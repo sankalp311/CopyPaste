@@ -1,144 +1,229 @@
-using Microsoft.Reporting.WebForms;
-using System;
-using System.Configuration;
-using System.Data;
-using System.Data.SqlClient;
-using System.Web;
-using System.Web.UI;
+CREATE PROC [dbo].[SP_ICM_RoomList_New_Change_Xld_RDLC]      
+(      
+    @RunTime DATETIME = '2025-12-17T09:30:49',      
+    @EMNNO   VARCHAR(10) = '12774',      
+    @HTNNO   VARCHAR(10) = '23880'      
+)      
+AS      
+/*      
+ EXEC [SP_ICM_RoomList_New_Change_Xld_RDLC] '2025-12-17 09:30:49.000','12774','23880'       
+*/      
+BEGIN      
+    SET NOCOUNT ON;          
+    BEGIN TRY      
 
-namespace ICM.Reports
-{
-     public partial class HotelConfirmation : Page
-     {
-          private const string DS_ROOMLIST = "DsRoomList";   // ResultSet 1
-          private const string DS_CHANGELOG = "DsChangeLog";  // ResultSet 2
-          private const string DS_HEADER = "Accepted";     // ResultSet 3
+	insert into ParamValues(
+				ParamName,
+				ParamValue)
+				VALUES('SP_ICM_RoomList_New_Change_Xld_RDLC-RunTime',@RunTime),
+				('SP_ICM_RoomList_New_Change_Xld_RDLC-EventID',@EMNNO),
+				('SP_ICM_RoomList_New_Change_Xld_RDLC-HTNNO',@HTNNO)
+      
+    /* =========================      
+       MAIN ROOMING LIST      
+       ========================= */      
+      
+    SELECT      
+        HER.RSNNO,      
+  ISNULL(HER.EXC_RM_BLK_ORG,'')  As BlockName,      
+        ISNULL(HER.EXC_RES_LEAD_NAME,'')        AS LEAD_Name,      
+        ISNULL(HER.EXC_RES_FIRSTNAME,'')        AS RGCPLNM,      
+        ISNULL(HER.EXC_RES_LASTNAME,'')         AS RGCPFNM,      
+        ISNULL(HER.EXC_REGISTRANT_ORG,'')       AS RGCPORG,      
+        ''                                      AS RGCNO,      
+        ''                                      AS RGCEMAIL,      
+        ISNULL(HER.EXC_EVENTNAME,'')            AS EMCNM,      
+        ISNULL(HER.EXC_HOTEL_NAME,'')            AS HTCDSC,      
+        ISNULL(RHC.ConfirmationText,'')          AS Confirmation,      
+        ISNULL(RHC.NoteText,'')                  AS Note,      
+      
+        CONVERT(varchar(10), HER.EXC_ARRIVE, 101)      
+            + ' ' + DATENAME(weekday, HER.EXC_ARRIVE) AS RSDTARR,      
+      
+        CONVERT(varchar(10), HER.EXC_DEPART, 101)      
+            + ' ' + DATENAME(weekday, HER.EXC_DEPART) AS RSDTDEP,      
+      
+        cast(DATEDIFF(day, HER.EXC_ARRIVE, HER.EXC_DEPART) as varchar) AS Night,      
+      
+        ISNULL(HER.EXC_RES_PREFERENCES,'')       AS Preference,      
+        ISNULL(HER.EXC_RES_CC_TYPE,'')           AS RSCCCTYPE,      
+        ISNULL(HER.EXC_RES_CC_NO,'')             AS RSCCCNO,      
+        ISNULL(HER.EXC_RES_CC_EXP,'')            AS RSCCCEXP,      
+        ISNULL(HER.EXC_ROOM_TYPE,'')             AS RCCDESC,      
+        ISNULL(HER.EXC_RES_ROOM_OCCUPANCY,'')    AS RTCDESC,      
+      
+        CASE HER.EXC_REPORT_TYPE      
+            WHEN 'A' THEN 'New'      
+            WHEN 'C' THEN 'Changed'      
+            WHEN 'X' THEN 'Cancelled'      
+        END AS ReportType,    
+  @RunTime AS RunTime    
+      
+    FROM [ICM_Report_Exports_Core].[dbo].[HOTEL_EXPORT_REPORTS] HER      
+    LEFT JOIN RoomingHotelConfirmation RHC      
+           ON RHC.RSNNO = HER.RSNNO      
+    WHERE HER.EXDT_RUNTIME = @RunTime      
+      AND HER.EXC_REPORT_TYPE IN ('A','C','X')      
+    ORDER BY ReportType DESC, RSNNO DESC;      
+      
+      
+    /* =========================      
+       CHANGE DETAILS      
+       ========================= */      
+      
+   -- SELECT     
+   --     ISNULL(HRC.RSNNO,'')          AS RSNNO,      
+   --     ISNULL(HRC.HCC_FIELDNAME,'')  AS RHCFIELDNAME,      
+   --     HRC.HCC_OLD_VALUE             AS RHCOLDVALUE,      
+   --     HRC.HCC_NEW_VALUE             AS RHCNEWVALUE      
+   -- FROM [ICM_Report_Exports_Core].[dbo].HOTEL_RES_CHANGES HRC      
+   -- INNER JOIN [ICM_Report_Exports_Core].[dbo].HOTEL_EXPORT_REPORTS HER      
+   --         ON HER.RSNNO = HRC.RSNNO      
+   -- WHERE HER.EXDT_RUNTIME = @RunTime      
+   --   AND HER.EXC_REPORT_TYPE = 'C'      
+   --AND LEN(CAST(HRC.HCC_OLD_VALUE AS VARCHAR)) < 20    
+   --ORDER BY HRC.RSNNO DESC;      
+    
+ SELECT    
+    X.RSNNO,    
+    CAST(    
+        'Change Requests:<br/>' +    
+        STUFF((    
+            SELECT    
+                -- FieldName + padding so "Was:" starts at same column everywhere    
+                '<b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + REPLACE(REPLACE(REPLACE(ISNULL(HRC2.HCC
+_FIELDNAME,''),'&','&amp;'),'<','&lt;'),'>','&gt;') + '</b>' +    
+                REPLICATE('&nbsp;', CASE    
+                    WHEN G.MaxFieldLen > LEN(ISNULL(HRC2.HCC_FIELDNAME,''))     
+          THEN (G.MaxFieldLen - LEN(ISNULL(HRC2.HCC_FIELDNAME,'')) + 4)   -- +4 = gap before "Was:"    
+                    ELSE 4    
+                END) +    
+       '<b>Was:</b>&nbsp;' +    
+                REPLACE(REPLACE(REPLACE(ISNULL(CAST(HRC2.HCC_OLD_VALUE AS NVARCHAR(MAX)),''),'&','&amp;'),'<','&lt;'),'>','&gt;') +    
+                '<br/>' +    
+    
+                -- indent "Now:" to start exactly under "Was:"    
+                REPLICATE('&nbsp;&nbsp;&nbsp;&nbsp;', G.MaxFieldLen + 2) +    
+                '<b>Now:</b>&nbsp;' +    
+                REPLACE(REPLACE(REPLACE(ISNULL(CAST(HRC2.HCC_NEW_VALUE AS NVARCHAR(MAX)),''),'&','&amp;'),'<','&lt;'),'>','&gt;') +    
+                '<br/><br/>'    
+            FROM [ICM_Report_Exports_Core].[dbo].HOTEL_RES_CHANGES HRC2    
+            INNER JOIN [ICM_Report_Exports_Core].[dbo].HOTEL_EXPORT_REPORTS HER2    
+                ON HER2.RSNNO = HRC2.RSNNO    
+            WHERE    
+                HER2.EXDT_RUNTIME = @RunTime    
+                AND HER2.EXC_REPORT_TYPE = 'C'    
+                AND LEN(CAST(HRC2.HCC_OLD_VALUE AS VARCHAR(100))) < 20    
+                AND HRC2.RSNNO = X.RSNNO    
+            ORDER BY HRC2.HCC_FIELDNAME    
+            FOR XML PATH(''), TYPE    
+        ).value('.', 'NVARCHAR(MAX)'), 1, 0, '')    
+    AS NVARCHAR(MAX)) AS RHCFIELDNAME,    
+ '' AS RHCOLDVALUE,    
+ '' AS RHCNEWVALUE    
+FROM    
+(    
+    SELECT DISTINCT HRC.RSNNO    
+    FROM [ICM_Report_Exports_Core].[dbo].HOTEL_RES_CHANGES HRC    
+    INNER JOIN [ICM_Report_Exports_Core].[dbo].HOTEL_EXPORT_REPORTS HER    
+        ON HER.RSNNO = HRC.RSNNO    
+    WHERE    
+        HER.EXDT_RUNTIME = @RunTime    
+        AND HER.EXC_REPORT_TYPE = 'C'    
+        AND LEN(CAST(HRC.HCC_OLD_VALUE AS VARCHAR(100))) < 20    
+) X    
+CROSS JOIN    
+(    
+    -- Global max field length for uniform alignment across ALL RSNNO    
+    SELECT MAX(LEN(ISNULL(HRC.HCC_FIELDNAME,''))) AS MaxFieldLen    
+    FROM [ICM_Report_Exports_Core].[dbo].HOTEL_RES_CHANGES HRC    
+    INNER JOIN [ICM_Report_Exports_Core].[dbo].HOTEL_EXPORT_REPORTS HER    
+        ON HER.RSNNO = HRC.RSNNO    
+    WHERE    
+        HER.EXDT_RUNTIME = @RunTime    
+        AND HER.EXC_REPORT_TYPE = 'C'    
+        AND LEN(CAST(HRC.HCC_OLD_VALUE AS VARCHAR(100))) < 20    
+) G    
+ORDER BY X.RSNNO DESC;    
+    
+    
+    
+    
+      
+      
+    /* =========================      
+       EVENT HEADER      
+       ========================= */      
+      
+    --SELECT      
+    --    ev.EMCNM,      
+    --    CONVERT(varchar(10), ev.EMDTBEG, 101) AS StartDate,      
+    --    CONVERT(varchar(10), ev.EMDTEND, 101) AS EndDate,      
+    --    HT.HTCDSC,      
+    --    CONVERT(varchar(20), @RunTime, 100)   AS Processed      
+    --FROM events ev      
+    --INNER JOIN Hotel HT      
+    --    ON HT.EMNNO = ev.EMNNO      
+    --WHERE HT.HTNNO = @HTNNO;      
+      
+    
+        
+SELECT    
+    v.HotelAuthorizedSignature,   -- "John Smith"    
+    v.Title,                      -- "Sales Administrator"    
+    v.SignDate,                   -- 2025-12-26 (DATE)    
+    v.AcceptStatus,               -- "ACCEPTED"    
+    v.IPAddress,                  -- "64.13.40.33"    
+    v.AcceptDateTime,             -- 2025-12-26 07:18:34 (DATETIME)    
+    
+    -- Optional: ready-to-print strings (use these only if you don't want to format in RDLC)    
+    CONVERT(varchar(10), v.SignDate, 101) AS SignDateText,          -- 12/26/2025    
+    CONVERT(varchar(10), v.AcceptDateTime, 101) + ' ' +    
+    RIGHT('0' + CAST((DATEPART(HOUR, v.AcceptDateTime) + 11) % 12 + 1 AS varchar(2)), 2) + ':' +    
+    RIGHT('0' + CAST(DATEPART(MINUTE, v.AcceptDateTime) AS varchar(2)), 2) + ':' +    
+    RIGHT('0' + CAST(DATEPART(SECOND, v.AcceptDateTime) AS varchar(2)), 2) +    
+    CASE WHEN DATEPART(HOUR, v.AcceptDateTime) < 12 THEN 'AM' ELSE 'PM' END    
+    AS AcceptDateTimeText                                         -- 12/26/2025 07:18:34AM    
+FROM (VALUES    
+    (    
+      CAST('John Smith'          AS nvarchar(200)),    
+      CAST('Sales Administrator' AS nvarchar(200)),    
+      CAST('2025-12-26'          AS date),    
+      CAST('1'            AS varchar(20)),    
+      CAST('64.13.40.33'         AS varchar(45)),    
+      CAST('2025-12-26T07:18:34' AS datetime)    
+    )    
+) v(    
+    HotelAuthorizedSignature,    
+    Title,    
+    SignDate,    
+    AcceptStatus,    
+    IPAddress,    
+    AcceptDateTime    
+);    
+    
+    
+    
+    
+    
+    END TRY      
+    BEGIN CATCH      
+        INSERT INTO dbo.dbErrorLogs      
+        (      
+            UserName, ErrorNumber, ErrorState, ErrorSeverity,      
+            ErrorLine, ErrorProcedure, ErrorMessage, ErrorOccuredOn      
+        )      
+        VALUES      
+        (      
+            SUSER_SNAME(), ERROR_NUMBER(), ERROR_STATE(),      
+            ERROR_SEVERITY(), ERROR_LINE(),      
+            ERROR_PROCEDURE(), ERROR_MESSAGE(), GETDATE()      
+        );      
+      
+    
+    
+      
+    END CATCH      
+END 
 
-          // Your RDLC location
-          private const string REPORT_PATH = "~/Report16/HotelConfirmation.rdlc";
 
-          protected void Page_Load(object sender, EventArgs e)
-          {
-               if (!IsPostBack)
-                    DownloadPdf();
-          }
-
-          private void DownloadPdf()
-          {
-               string emnno = QS("EMNNO");
-               string htnno = QS("HTNNO");
-               string runTimeStr = QS("RunTime");
-
-               DateTime runTime;
-               bool hasRunTime = DateTime.TryParse(runTimeStr, out runTime);
-
-               DataSet ds = GetDataFromSp(
-                   emnno: emnno,
-                   htnno: htnno,
-                   runTime: hasRunTime ? (DateTime?)runTime : null
-               );
-
-               DataTable t0 = (ds.Tables.Count > 0) ? ds.Tables[0] : new DataTable(); // RoomList
-               DataTable t1 = (ds.Tables.Count > 1) ? ds.Tables[1] : new DataTable(); // ChangeLog
-               DataTable t2 = (ds.Tables.Count > 2) ? ds.Tables[2] : new DataTable(); // Header
-
-               // OPTIONAL: give names for clarity/debugging
-               t0.TableName = DS_ROOMLIST;
-               t1.TableName = DS_CHANGELOG;
-               t2.TableName = DS_HEADER;
-
-               string rdlcPath = Server.MapPath(REPORT_PATH);
-               if (string.IsNullOrWhiteSpace(rdlcPath) || !System.IO.File.Exists(rdlcPath))
-                    throw new Exception("RDLC file not found at: " + REPORT_PATH);
-
-               LocalReport report = new LocalReport
-               {
-                    ReportPath = rdlcPath
-               };
-
-               report.DataSources.Clear();
-
-               // ✅ Main dataset
-               report.DataSources.Add(new ReportDataSource(DS_ROOMLIST, t0));
-
-               // ✅ Add this extra alias to prevent: "Cannot create a data reader for dataset 'HC'"
-               // If your RDLC still references dataset name HC anywhere, it will use this and NOT execute internal query.
-               report.DataSources.Add(new ReportDataSource("HC", t0));
-               report.DataSources.Add(new ReportDataSource("Accepted", t2));
-
-               // ✅ Other datasets
-               report.DataSources.Add(new ReportDataSource(DS_CHANGELOG, t1));
-               report.DataSources.Add(new ReportDataSource(DS_HEADER, t2));
-
-               // Render
-               string mimeType, encoding, extension;
-               Warning[] warnings;
-               string[] streams;
-
-               string deviceInfo = $@"<DeviceInfo>
-  <OutputFormat>PDF</OutputFormat>
-  <PageWidth>10in</PageWidth>
-  <MarginTop>0.25in</MarginTop>
-  <MarginLeft>0.25in</MarginLeft>
-  <MarginRight>0.25in</MarginRight>
-  <MarginBottom>0.25in</MarginBottom>
-</DeviceInfo>";
-
-               byte[] pdfBytes = report.Render(
-                   "PDF",
-                   deviceInfo,
-                   out mimeType,
-                   out encoding,
-                   out extension,
-                   out streams,
-                   out warnings
-               );
-
-
-               // Download
-               Response.Clear();
-               Response.Buffer = true;
-               Response.ContentType = "application/pdf";
-               Response.AddHeader("Content-Disposition", "attachment; filename=HotelConfirmation.pdf");
-               Response.Cache.SetCacheability(HttpCacheability.NoCache);
-               Response.BinaryWrite(pdfBytes);
-               Response.Flush();
-               Context.ApplicationInstance.CompleteRequest();
-          }
-
-          private DataSet GetDataFromSp(string emnno, string htnno, DateTime? runTime)
-          {
-               DataSet ds = new DataSet();
-
-               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
-
-               using (SqlConnection con = new SqlConnection(cs))
-               using (SqlCommand cmd = new SqlCommand("dbo.SP_ICM_RoomList_New_Change_Xld_RDLC", con))
-               {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.CommandTimeout = 300;
-
-                    if (!string.IsNullOrWhiteSpace(emnno))
-                         cmd.Parameters.Add("@EMNNO", SqlDbType.VarChar, 10).Value = emnno.Trim();
-
-                    if (!string.IsNullOrWhiteSpace(htnno))
-                         cmd.Parameters.Add("@HTNNO", SqlDbType.VarChar, 10).Value = htnno.Trim();
-
-                    if (runTime.HasValue)
-                         cmd.Parameters.Add("@RunTime", SqlDbType.DateTime).Value = runTime.Value;
-
-                    using (SqlDataAdapter da = new SqlDataAdapter(cmd))
-                    {
-                         da.Fill(ds);
-                    }
-               }
-
-               return ds;
-          }
-
-          private string QS(string key)
-          {
-               return Request.QueryString[key] ?? Request.QueryString[key.ToLowerInvariant()] ?? "";
-          }
-     }
-}
