@@ -12,7 +12,7 @@ namespace ICM.Reports
      {
           private const string DS_ROOMLIST = "DsRoomList";   // ResultSet 1
           private const string DS_CHANGELOG = "DsChangeLog";  // ResultSet 2
-          private const string DS_HEADER = "DsHeader";     // ResultSet 3
+          private const string DS_HEADER = "Accepted";     // ResultSet 3
 
           // Your RDLC location
           private const string REPORT_PATH = "~/Report16/HotelConfirmation.rdlc";
@@ -64,6 +64,7 @@ namespace ICM.Reports
                // ✅ Add this extra alias to prevent: "Cannot create a data reader for dataset 'HC'"
                // If your RDLC still references dataset name HC anywhere, it will use this and NOT execute internal query.
                report.DataSources.Add(new ReportDataSource("HC", t0));
+               report.DataSources.Add(new ReportDataSource("Accepted", t2));
 
                // ✅ Other datasets
                report.DataSources.Add(new ReportDataSource(DS_CHANGELOG, t1));
