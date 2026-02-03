@@ -1,229 +1,178 @@
-CREATE PROC [dbo].[SP_ICM_RoomList_New_Change_Xld_RDLC]      
-(      
-    @RunTime DATETIME = '2025-12-17T09:30:49',      
-    @EMNNO   VARCHAR(10) = '12774',      
-    @HTNNO   VARCHAR(10) = '23880'      
-)      
-AS      
-/*      
- EXEC [SP_ICM_RoomList_New_Change_Xld_RDLC] '2025-12-17 09:30:49.000','12774','23880'       
-*/      
-BEGIN      
-    SET NOCOUNT ON;          
-    BEGIN TRY      
-
-	insert into ParamValues(
-				ParamName,
-				ParamValue)
-				VALUES('SP_ICM_RoomList_New_Change_Xld_RDLC-RunTime',@RunTime),
-				('SP_ICM_RoomList_New_Change_Xld_RDLC-EventID',@EMNNO),
-				('SP_ICM_RoomList_New_Change_Xld_RDLC-HTNNO',@HTNNO)
-      
-    /* =========================      
-       MAIN ROOMING LIST      
-       ========================= */      
-      
-    SELECT      
-        HER.RSNNO,      
-  ISNULL(HER.EXC_RM_BLK_ORG,'')  As BlockName,      
-        ISNULL(HER.EXC_RES_LEAD_NAME,'')        AS LEAD_Name,      
-        ISNULL(HER.EXC_RES_FIRSTNAME,'')        AS RGCPLNM,      
-        ISNULL(HER.EXC_RES_LASTNAME,'')         AS RGCPFNM,      
-        ISNULL(HER.EXC_REGISTRANT_ORG,'')       AS RGCPORG,      
-        ''                                      AS RGCNO,      
-        ''                                      AS RGCEMAIL,      
-        ISNULL(HER.EXC_EVENTNAME,'')            AS EMCNM,      
-        ISNULL(HER.EXC_HOTEL_NAME,'')            AS HTCDSC,      
-        ISNULL(RHC.ConfirmationText,'')          AS Confirmation,      
-        ISNULL(RHC.NoteText,'')                  AS Note,      
-      
-        CONVERT(varchar(10), HER.EXC_ARRIVE, 101)      
-            + ' ' + DATENAME(weekday, HER.EXC_ARRIVE) AS RSDTARR,      
-      
-        CONVERT(varchar(10), HER.EXC_DEPART, 101)      
-            + ' ' + DATENAME(weekday, HER.EXC_DEPART) AS RSDTDEP,      
-      
-        cast(DATEDIFF(day, HER.EXC_ARRIVE, HER.EXC_DEPART) as varchar) AS Night,      
-      
-        ISNULL(HER.EXC_RES_PREFERENCES,'')       AS Preference,      
-        ISNULL(HER.EXC_RES_CC_TYPE,'')           AS RSCCCTYPE,      
-        ISNULL(HER.EXC_RES_CC_NO,'')             AS RSCCCNO,      
-        ISNULL(HER.EXC_RES_CC_EXP,'')            AS RSCCCEXP,      
-        ISNULL(HER.EXC_ROOM_TYPE,'')             AS RCCDESC,      
-        ISNULL(HER.EXC_RES_ROOM_OCCUPANCY,'')    AS RTCDESC,      
-      
-        CASE HER.EXC_REPORT_TYPE      
-            WHEN 'A' THEN 'New'      
-            WHEN 'C' THEN 'Changed'      
-            WHEN 'X' THEN 'Cancelled'      
-        END AS ReportType,    
-  @RunTime AS RunTime    
-      
-    FROM [ICM_Report_Exports_Core].[dbo].[HOTEL_EXPORT_REPORTS] HER      
-    LEFT JOIN RoomingHotelConfirmation RHC      
-           ON RHC.RSNNO = HER.RSNNO      
-    WHERE HER.EXDT_RUNTIME = @RunTime      
-      AND HER.EXC_REPORT_TYPE IN ('A','C','X')      
-    ORDER BY ReportType DESC, RSNNO DESC;      
-      
-      
-    /* =========================      
-       CHANGE DETAILS      
-       ========================= */      
-      
-   -- SELECT     
-   --     ISNULL(HRC.RSNNO,'')          AS RSNNO,      
-   --     ISNULL(HRC.HCC_FIELDNAME,'')  AS RHCFIELDNAME,      
-   --     HRC.HCC_OLD_VALUE             AS RHCOLDVALUE,      
-   --     HRC.HCC_NEW_VALUE             AS RHCNEWVALUE      
-   -- FROM [ICM_Report_Exports_Core].[dbo].HOTEL_RES_CHANGES HRC      
-   -- INNER JOIN [ICM_Report_Exports_Core].[dbo].HOTEL_EXPORT_REPORTS HER      
-   --         ON HER.RSNNO = HRC.RSNNO      
-   -- WHERE HER.EXDT_RUNTIME = @RunTime      
-   --   AND HER.EXC_REPORT_TYPE = 'C'      
-   --AND LEN(CAST(HRC.HCC_OLD_VALUE AS VARCHAR)) < 20    
-   --ORDER BY HRC.RSNNO DESC;      
+  
     
- SELECT    
-    X.RSNNO,    
-    CAST(    
-        'Change Requests:<br/>' +    
-        STUFF((    
-            SELECT    
-                -- FieldName + padding so "Was:" starts at same column everywhere    
-                '<b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + REPLACE(REPLACE(REPLACE(ISNULL(HRC2.HCC
-_FIELDNAME,''),'&','&amp;'),'<','&lt;'),'>','&gt;') + '</b>' +    
-                REPLICATE('&nbsp;', CASE    
-                    WHEN G.MaxFieldLen > LEN(ISNULL(HRC2.HCC_FIELDNAME,''))     
-          THEN (G.MaxFieldLen - LEN(ISNULL(HRC2.HCC_FIELDNAME,'')) + 4)   -- +4 = gap before "Was:"    
-                    ELSE 4    
-                END) +    
-       '<b>Was:</b>&nbsp;' +    
-                REPLACE(REPLACE(REPLACE(ISNULL(CAST(HRC2.HCC_OLD_VALUE AS NVARCHAR(MAX)),''),'&','&amp;'),'<','&lt;'),'>','&gt;') +    
-                '<br/>' +    
-    
-                -- indent "Now:" to start exactly under "Was:"    
-                REPLICATE('&nbsp;&nbsp;&nbsp;&nbsp;', G.MaxFieldLen + 2) +    
-                '<b>Now:</b>&nbsp;' +    
-                REPLACE(REPLACE(REPLACE(ISNULL(CAST(HRC2.HCC_NEW_VALUE AS NVARCHAR(MAX)),''),'&','&amp;'),'<','&lt;'),'>','&gt;') +    
-                '<br/><br/>'    
-            FROM [ICM_Report_Exports_Core].[dbo].HOTEL_RES_CHANGES HRC2    
-            INNER JOIN [ICM_Report_Exports_Core].[dbo].HOTEL_EXPORT_REPORTS HER2    
-                ON HER2.RSNNO = HRC2.RSNNO    
-            WHERE    
-                HER2.EXDT_RUNTIME = @RunTime    
-                AND HER2.EXC_REPORT_TYPE = 'C'    
-                AND LEN(CAST(HRC2.HCC_OLD_VALUE AS VARCHAR(100))) < 20    
-                AND HRC2.RSNNO = X.RSNNO    
-            ORDER BY HRC2.HCC_FIELDNAME    
-            FOR XML PATH(''), TYPE    
-        ).value('.', 'NVARCHAR(MAX)'), 1, 0, '')    
-    AS NVARCHAR(MAX)) AS RHCFIELDNAME,    
- '' AS RHCOLDVALUE,    
- '' AS RHCNEWVALUE    
-FROM    
-(    
-    SELECT DISTINCT HRC.RSNNO    
-    FROM [ICM_Report_Exports_Core].[dbo].HOTEL_RES_CHANGES HRC    
-    INNER JOIN [ICM_Report_Exports_Core].[dbo].HOTEL_EXPORT_REPORTS HER    
-        ON HER.RSNNO = HRC.RSNNO    
-    WHERE    
-        HER.EXDT_RUNTIME = @RunTime    
-        AND HER.EXC_REPORT_TYPE = 'C'    
-        AND LEN(CAST(HRC.HCC_OLD_VALUE AS VARCHAR(100))) < 20    
-) X    
-CROSS JOIN    
-(    
-    -- Global max field length for uniform alignment across ALL RSNNO    
-    SELECT MAX(LEN(ISNULL(HRC.HCC_FIELDNAME,''))) AS MaxFieldLen    
-    FROM [ICM_Report_Exports_Core].[dbo].HOTEL_RES_CHANGES HRC    
-    INNER JOIN [ICM_Report_Exports_Core].[dbo].HOTEL_EXPORT_REPORTS HER    
-        ON HER.RSNNO = HRC.RSNNO    
-    WHERE    
-        HER.EXDT_RUNTIME = @RunTime    
-        AND HER.EXC_REPORT_TYPE = 'C'    
-        AND LEN(CAST(HRC.HCC_OLD_VALUE AS VARCHAR(100))) < 20    
-) G    
-ORDER BY X.RSNNO DESC;    
-    
-    
-    
-    
+CREATE PROCEDURE [dbo].[sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams_RDLC]       
+@EMNNO int      
+As      
+BEGIN    
+-- Author:  <Pravendra>            
+-- Create date: <28/01/2026>            
+-- Description: <Room Block Detail - with Pickup>     
+Set NoCount On       
+SET ANSI_WARNINGS OFF       
       
+SELECT       
+        EVENTS.EMNNO,       
+        EVENTS.EMCACRO,      
+        EVENTS.EMCPRO,      
+        HOTELROOMBLOCKS.HBNNO,       
+        HOTELROOMBLOCKS.HBCACRO,       
+        ROOMCATEGORIES.RCCDESC,       
+        HOTELROOMBLOCKS.HBCNO,       
+        HOTELROOMBLOCKS.HBCORG,       
+        HOTELROOMBLOCKS.HBCFNM,       
+        HOTELROOMBLOCKS.HBCLNM,       
+        HOTELROOMBLOCKS.HBCTEL,       
+        HOTELROOMBLOCKS.HBDTSTART,      
+        HOTELROOMBLOCKS.HBDTXLD,         
+        ROOMCATEGORIES.RCCACRO,       
+        HOTEL.HTNNO,       
+        EVENTS.EMDTBEG,       
+        EVENTS.EMDTEND,       
+        EVENTS.EMCNM,       
+        HOTEL.HTCDSC,       
+        HOTELROOMBLOCKS.HBNAPPROVED,       
+        HOTELROOMBLOCKS.HTNNO,       
+  HOTELROOMBLOCKS.HBDTAPPROVED,      
+        HOTEL.EMNNO,       
+        RESERVATIONS.RSNNO,      
+        RESERVATIONS.RSDTARR,      
+        RESERVATIONS.RSDTDEP,      
+        RESERVATIONS.RSDTXLD,      
+        REGMST.RGNNO,      
+        REGMST.RGCNO,      
+        REGMST.RGCPLNM,      
+        REGMST.RGCPFNM,      
+        REGMST.RGCPCITY,      
+        REGMST.RGCPST,      
+        REGMST.RGCEMAIL,      
+        isnull(BLOCK_INVENTORY.Block_Amount_Reserved,0) Block_Total_Amount_Reserved,       
+        isnull(BLOCK_INVENTORY.Block_Remaining_Available,0) Block_Total_Remaining_Available,       
+        isnull(BLOCK_INVENTORY.Block_Adjustments,0) Block_Total_Adjustments,       
+        isnull(BLOCK_INVENTORY.Max_Reserved,0) Block_Max_Reserved,       
+        isnull(BLOCK_INVENTORY.Max_Requested,0) Block_Max_Requested,       
+        isnull(sum(BLOCK_PICKUPS.Block_Pickups),0) Block_Total_Pickups,       
+        isnull(max(BLOCK_PICKUPS.Block_Pickups),0) Block_Max_Pickups,       
+      --  isnull(max(BLOCK_PICKUPS.Block_Pickups),0) Block_Max_Pickups_2,       
+  isnull(max(BLOCK_INVENTORY.BLOCK_RESERVED_ADJUSTED),0) BLOCK_RESERVED_ADJUSTED      
+FROM         
+        HOTEL       
+        LEFT OUTER JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO       
+        LEFT OUTER JOIN RESERVATIONS ON HOTELROOMBLOCKS.HBNNO=RESERVATIONS.HBNNO      
+        LEFT OUTER JOIN REGMST on REGMST.RGNNO=RESERVATIONS.RGNNO      
+        LEFT OUTER JOIN EVENTS ON HOTEL.EMNNO=EVENTS.EMNNO       
+        LEFT OUTER JOIN ROOMCATEGORIES ON HOTELROOMBLOCKS.RCNNO=ROOMCATEGORIES.RCNNO       
+        LEFT OUTER JOIN (       
+                SELECT       
+                        EVENTS.EMNNO,       
+                        HOTELROOMBLOCKS.HBNNO,       
+                        max(RBNAMOUNTREQUESTED) Max_Requested,        
+                        max(RBNAMOUNTRESERVED) Max_Reserved,       
+                        sum(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED) Block_Amount_Reserved,       
+                        sum(HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE) Block_Remaining_Available,       
+                        sum(HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS) Block_Adjustments,       
+      max(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS) BLOCK_RESERVED_ADJUSTED      
+     -- max(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS)-HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE Block_Max_Pickups_2      
+                FROM       
+                        (((       
+                        EVENTS INNER       
+                        JOIN HOTEL ON EVENTS.EMNNO=HOTEL.EMNNO) INNER       
+                        JOIN HOTELROOMBLOCKS  ON       
+                        HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO) INNER JOIN       
+                        HOTELROOMBLOCKINVENTORY ON       
+                        HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO)       
+                WHERE       
+             EVENTS.EMNNO=@EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
+                     --   And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'ReservationsCancelled'      
+      And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'CompTournament'      
+      And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'BillingsleyJohn'       
+            
+      --And  EVENTS.EMDTBEG>=@RGDTADD_FROM AND  EVENTS.EMDTBEG <=@RGDTADD_TO      
+                GROUP BY       
+                        EVENTS.EMNNO,      
+                        EVENTS.EMCACRO,      
+                        EVENTS.EMCPRO,      
+                        HOTELROOMBLOCKS.HBNNO      
+                   --     HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE      
+            
+        ) BLOCK_INVENTORY ON EVENTS.EMNNO = BLOCK_INVENTORY.EMNNO       
+        and HOTELROOMBLOCKS.HBNNO = BLOCK_INVENTORY.HBNNO       
+        LEFT OUTER JOIN (       
+                SELECT       
+                        EVENTS.EMNNO,       
+                        RESERVATIONS.HBNNO,       
+                        RESNIGHTS.HINNO,       
+                        count(RESNIGHTS.RSNNO) Block_Pickups       
+                FROM       
+                        (((EVENTS INNER       
+                        JOIN REGMST ON EVENTS.EMNNO=REGMST.EMNNO) INNER       
+                        JOIN RESERVATIONS ON       
+                        REGMST.RGNNO=RESERVATIONS.RGNNO       
+                                AND RESERVATIONS.RSDTXLD is NULL       
+                                AND NOT RESERVATIONS.HBNNO is NULL) INNER JOIN       
+                        RESNIGHTS ON       
+                        RESERVATIONS.RSNNO=RESNIGHTS.RSNNO)       
+                WHERE       
+                        EVENTS.EMNNO=@EMNNO       
+                        --And RESERVATIONS.RSDTXLD is null      
+                GROUP BY       
+                        EVENTS.EMNNO,      
+                        EVENTS.EMCACRO,      
+                        EVENTS.EMCPRO,      
+                        RESERVATIONS.HBNNO,       
+                        RESNIGHTS.HINNO       
+        ) BLOCK_PICKUPS ON EVENTS.EMNNO = BLOCK_PICKUPS.EMNNO       
+                and HOTELROOMBLOCKS.HBNNO = BLOCK_PICKUPS.HBNNO       
+WHERE       
+        EVENTS.EMNNO = @EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
+              
+              
+    --    And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'ReservationsCancelled'      
+  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'      
+  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'       
+  --And RESERVATIONS.RSDTXLD is null      
+  --And  EVENTS.EMDTBEG>=@RGDTADD_FROM AND  EVENTS.EMDTBEG <=@RGDTADD_TO      
+              
+GROUP BY       
+        EVENTS.EMNNO,       
+        EVENTS.EMCACRO,      
+        EVENTS.EMCPRO,      
+        HOTELROOMBLOCKS.HBNNO,       
+        HOTELROOMBLOCKS.HBCACRO,       
+        ROOMCATEGORIES.RCCDESC,       
+        HOTELROOMBLOCKS.HBCNO,       
+        HOTELROOMBLOCKS.HBCORG,       
+        HOTELROOMBLOCKS.HBCFNM,       
+        HOTELROOMBLOCKS.HBCLNM,       
+        HOTELROOMBLOCKS.HBCTEL,       
+        HOTELROOMBLOCKS.HBDTSTART,       
+        ROOMCATEGORIES.RCCACRO,       
+        HOTEL.HTNNO,       
+        EVENTS.EMDTBEG,       
+        EVENTS.EMDTEND,       
+        EVENTS.EMCNM,       
+        HOTEL.HTCDSC,       
+        HOTELROOMBLOCKS.HBNAPPROVED,       
+        HOTELROOMBLOCKS.HBDTXLD,      
+        HOTELROOMBLOCKS.HTNNO,      
+  HOTELROOMBLOCKS.HBDTAPPROVED,       
+        HOTEL.EMNNO,       
+              
+        isnull(BLOCK_INVENTORY.Block_Amount_Reserved,0),       
+        isnull(BLOCK_INVENTORY.Block_Remaining_Available,0),       
+        isnull(BLOCK_INVENTORY.Block_Adjustments,0),       
+        isnull(BLOCK_INVENTORY.Max_Reserved,0),       
+        isnull(BLOCK_INVENTORY.Max_Requested,0),      
       
-    /* =========================      
-       EVENT HEADER      
-       ========================= */      
-      
-    --SELECT      
-    --    ev.EMCNM,      
-    --    CONVERT(varchar(10), ev.EMDTBEG, 101) AS StartDate,      
-    --    CONVERT(varchar(10), ev.EMDTEND, 101) AS EndDate,      
-    --    HT.HTCDSC,      
-    --    CONVERT(varchar(20), @RunTime, 100)   AS Processed      
-    --FROM events ev      
-    --INNER JOIN Hotel HT      
-    --    ON HT.EMNNO = ev.EMNNO      
-    --WHERE HT.HTNNO = @HTNNO;      
-      
-    
-        
-SELECT    
-    v.HotelAuthorizedSignature,   -- "John Smith"    
-    v.Title,                      -- "Sales Administrator"    
-    v.SignDate,                   -- 2025-12-26 (DATE)    
-    v.AcceptStatus,               -- "ACCEPTED"    
-    v.IPAddress,                  -- "64.13.40.33"    
-    v.AcceptDateTime,             -- 2025-12-26 07:18:34 (DATETIME)    
-    
-    -- Optional: ready-to-print strings (use these only if you don't want to format in RDLC)    
-    CONVERT(varchar(10), v.SignDate, 101) AS SignDateText,          -- 12/26/2025    
-    CONVERT(varchar(10), v.AcceptDateTime, 101) + ' ' +    
-    RIGHT('0' + CAST((DATEPART(HOUR, v.AcceptDateTime) + 11) % 12 + 1 AS varchar(2)), 2) + ':' +    
-    RIGHT('0' + CAST(DATEPART(MINUTE, v.AcceptDateTime) AS varchar(2)), 2) + ':' +    
-    RIGHT('0' + CAST(DATEPART(SECOND, v.AcceptDateTime) AS varchar(2)), 2) +    
-    CASE WHEN DATEPART(HOUR, v.AcceptDateTime) < 12 THEN 'AM' ELSE 'PM' END    
-    AS AcceptDateTimeText                                         -- 12/26/2025 07:18:34AM    
-FROM (VALUES    
-    (    
-      CAST('John Smith'          AS nvarchar(200)),    
-      CAST('Sales Administrator' AS nvarchar(200)),    
-      CAST('2025-12-26'          AS date),    
-      CAST('1'            AS varchar(20)),    
-      CAST('64.13.40.33'         AS varchar(45)),    
-      CAST('2025-12-26T07:18:34' AS datetime)    
-    )    
-) v(    
-    HotelAuthorizedSignature,    
-    Title,    
-    SignDate,    
-    AcceptStatus,    
-    IPAddress,    
-    AcceptDateTime    
-);    
-    
-    
-    
-    
-    
-    END TRY      
-    BEGIN CATCH      
-        INSERT INTO dbo.dbErrorLogs      
-        (      
-            UserName, ErrorNumber, ErrorState, ErrorSeverity,      
-            ErrorLine, ErrorProcedure, ErrorMessage, ErrorOccuredOn      
-        )      
-        VALUES      
-        (      
-            SUSER_SNAME(), ERROR_NUMBER(), ERROR_STATE(),      
-            ERROR_SEVERITY(), ERROR_LINE(),      
-            ERROR_PROCEDURE(), ERROR_MESSAGE(), GETDATE()      
-        );      
-      
-    
-    
-      
-    END CATCH      
-END 
-
-
+  RESERVATIONS.RSNNO,      
+  RESERVATIONS.RSDTARR,      
+        RESERVATIONS.RSDTDEP,      
+        RESERVATIONS.RSDTXLD,      
+        REGMST.RGNNO,      
+        REGMST.RGCNO,      
+        REGMST.RGCPLNM,      
+        REGMST.RGCPFNM,      
+        REGMST.RGCPCITY,      
+        REGMST.RGCPST,      
+        REGMST.RGCEMAIL      
+  END  
+  
