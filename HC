@@ -1,15 +1,4 @@
-  
-    
-CREATE PROCEDURE [dbo].[sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams_RDLC]       
-@EMNNO int      
-As      
-BEGIN    
--- Author:  <Pravendra>            
--- Create date: <28/01/2026>            
--- Description: <Room Block Detail - with Pickup>     
-Set NoCount On       
-SET ANSI_WARNINGS OFF       
-      
+
 SELECT       
         EVENTS.EMNNO,       
         EVENTS.EMCACRO,      
@@ -53,7 +42,15 @@ SELECT
         isnull(sum(BLOCK_PICKUPS.Block_Pickups),0) Block_Total_Pickups,       
         isnull(max(BLOCK_PICKUPS.Block_Pickups),0) Block_Max_Pickups,       
       --  isnull(max(BLOCK_PICKUPS.Block_Pickups),0) Block_Max_Pickups_2,       
-  isnull(max(BLOCK_INVENTORY.BLOCK_RESERVED_ADJUSTED),0) BLOCK_RESERVED_ADJUSTED      
+  isnull(max(BLOCK_INVENTORY.BLOCK_RESERVED_ADJUSTED),0) BLOCK_RESERVED_ADJUSTED 
+  , BlockGroupKey =
+    CASE 
+        WHEN NULLIF(LTRIM(RTRIM(HOTELROOMBLOCKS.HBCACRO)), '') IS NULL
+            THEN CAST(HOTELROOMBLOCKS.HBCNO AS varchar(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS varchar(20))
+        ELSE
+            CAST(HOTELROOMBLOCKS.HBCACRO AS varchar(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS varchar(20))
+    END
+
 FROM         
         HOTEL       
         LEFT OUTER JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO       
@@ -81,7 +78,7 @@ FROM
                         HOTELROOMBLOCKINVENTORY ON       
                         HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO)       
                 WHERE       
-             EVENTS.EMNNO=@EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
+             EVENTS.EMNNO=20156 and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
                      --   And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'ReservationsCancelled'      
       And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'CompTournament'      
       And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'BillingsleyJohn'       
@@ -112,7 +109,7 @@ FROM
                         RESNIGHTS ON       
                         RESERVATIONS.RSNNO=RESNIGHTS.RSNNO)       
                 WHERE       
-                        EVENTS.EMNNO=@EMNNO       
+                        EVENTS.EMNNO=20156       
                         --And RESERVATIONS.RSDTXLD is null      
                 GROUP BY       
                         EVENTS.EMNNO,      
@@ -123,14 +120,15 @@ FROM
         ) BLOCK_PICKUPS ON EVENTS.EMNNO = BLOCK_PICKUPS.EMNNO       
                 and HOTELROOMBLOCKS.HBNNO = BLOCK_PICKUPS.HBNNO       
 WHERE       
-        EVENTS.EMNNO = @EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
+        EVENTS.EMNNO = 20156 and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
               
               
-    --    And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'ReservationsCancelled'      
+    -- And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'ReservationsCancelled'      
   And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'      
   And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'       
   --And RESERVATIONS.RSDTXLD is null      
-  --And  EVENTS.EMDTBEG>=@RGDTADD_FROM AND  EVENTS.EMDTBEG <=@RGDTADD_TO      
+  --And  EVENTS.EMDTBEG>=@RGDTADD_FROM AND  EVENTS.EMDTBEG <=@RGDTADD_TO  
+    and HOTEL.HTNNO=185889
               
 GROUP BY       
         EVENTS.EMNNO,       
@@ -173,15 +171,36 @@ GROUP BY
         REGMST.RGCPFNM,      
         REGMST.RGCPCITY,      
         REGMST.RGCPST,      
-        REGMST.RGCEMAIL      
-  END  
+        REGMST.RGCEMAIL  
+		ORDER BY
+    CASE 
+        WHEN NULLIF(LTRIM(RTRIM(HOTELROOMBLOCKS.HBCACRO)), '') IS NULL
+            THEN CAST(HOTELROOMBLOCKS.HBCNO AS varchar(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS varchar(20))
+        ELSE
+            CAST(HOTELROOMBLOCKS.HBCACRO AS varchar(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS varchar(20))
+    END,
+    RESERVATIONS.RSNNO
+
+  above is my sql 
   
+  these are the guouping used in crystal i want exact count like crystal in my rdlc report so make it happen
   
+  EventSort
+  {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.EMCACRO}+TOTEXT({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.EMNNO})
   
- i want to apply this grouping on data
- 
- if isnull ({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCACRO}) then
+  HotelSort
+  {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HTCDSC}+Totext ({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HTNNO})
+  
+  SubBlk_Sort
+  if isnull ({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCACRO}) then
     {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCNO}+totext({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBNNO})
 else {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCACRO}+totext({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBNNO})
-these are from crystal report formula
+
+NameSort
+{sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.RGCPLNM}+
+{sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.RGCPFNM}+
+totext({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.RSNNO})
+
+  
+  
 
