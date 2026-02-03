@@ -1,127 +1,61 @@
-using Microsoft.Reporting.WebForms;
-using System;
-using System.Configuration;
-using System.Data;
-using System.Data.SqlClient;
-using System.Web;
-using System.Web.UI;
+SELECT
+    X.RSNNO,
+    CAST(
+        'Change Requests:<br/>' +
+        STUFF((
+            SELECT
+                -- FieldName + padding so "Was:" starts at same column everywhere
+                '<b>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;' + REPLACE(REPLACE(REPLACE(ISNULL(HRC2.HCC_FIELDNAME,''),'&','&amp;'),'<','&lt;'),'>','&gt;') + '</b>' +
+                REPLICATE('&nbsp;', CASE
+                    WHEN G.MaxFieldLen > LEN(ISNULL(HRC2.HCC_FIELDNAME,'')) 
+                        THEN (G.MaxFieldLen - LEN(ISNULL(HRC2.HCC_FIELDNAME,'')) + 4)   -- +4 = gap before "Was:"
+                    ELSE 4
+                END) +
+                '<b>Was:</b>&nbsp;' +
+                REPLACE(REPLACE(REPLACE(ISNULL(CAST(HRC2.HCC_OLD_VALUE AS NVARCHAR(MAX)),''),'&','&amp;'),'<','&lt;'),'>','&gt;') +
+                '<br/>' +
 
-namespace ICM.Reports
-{
-     public partial class HotelConfirmation : Page
-     {
-          // IMPORTANT:
-          // These dataset names MUST match the dataset names inside HotelConfirmation.rdlc
-          // If your RDLC uses different names, just change these constants.
-          private const string DS_ROOMLIST = "DsRoomList";   // result set 1
-          private const string DS_CHANGELOG = "DsChangeLog";  // result set 2
-          private const string DS_HEADER = "DsHeader";     // result set 3
-          private const string Report_PATH = "~/Report16/HotelConfirmation.rdlc";
-          protected void Page_Load(object sender, EventArgs e)
-          {
-               if (!IsPostBack)
-                    DownloadPdf();
-          }
+                -- indent "Now:" to start exactly under "Was:"
+                REPLICATE('&nbsp;&nbsp;&nbsp;&nbsp;', G.MaxFieldLen + 2) +
+                '<b>Now:</b>&nbsp;' +
+                REPLACE(REPLACE(REPLACE(ISNULL(CAST(HRC2.HCC_NEW_VALUE AS NVARCHAR(MAX)),''),'&','&amp;'),'<','&lt;'),'>','&gt;') +
+                '<br/><br/>'
+            FROM [ICM_Report_Exports_Core_22Dec].[dbo].HOTEL_RES_CHANGES HRC2
+            INNER JOIN [ICM_Report_Exports_Core_22Dec].[dbo].HOTEL_EXPORT_REPORTS HER2
+                ON HER2.RSNNO = HRC2.RSNNO
+            WHERE
+                HER2.EXDT_RUNTIME = @RunTime
+                AND HER2.EXC_REPORT_TYPE = 'C'
+                AND LEN(CAST(HRC2.HCC_OLD_VALUE AS VARCHAR(100))) < 20
+                AND HRC2.RSNNO = X.RSNNO
+            ORDER BY HRC2.HCC_FIELDNAME
+            FOR XML PATH(''), TYPE
+        ).value('.', 'NVARCHAR(MAX)'), 1, 0, '')
+    AS NVARCHAR(MAX)) AS RHCFIELDNAME,
+	'' AS RHCOLDVALUE,
+	'' AS RHCNEWVALUE
+FROM
+(
+    SELECT DISTINCT HRC.RSNNO
+    FROM [ICM_Report_Exports_Core_22Dec].[dbo].HOTEL_RES_CHANGES HRC
+    INNER JOIN [ICM_Report_Exports_Core_22Dec].[dbo].HOTEL_EXPORT_REPORTS HER
+        ON HER.RSNNO = HRC.RSNNO
+    WHERE
+        HER.EXDT_RUNTIME = @RunTime
+        AND HER.EXC_REPORT_TYPE = 'C'
+        AND LEN(CAST(HRC.HCC_OLD_VALUE AS VARCHAR(100))) < 20
+) X
+CROSS JOIN
+(
+    -- Global max field length for uniform alignment across ALL RSNNO
+    SELECT MAX(LEN(ISNULL(HRC.HCC_FIELDNAME,''))) AS MaxFieldLen
+    FROM [ICM_Report_Exports_Core_22Dec].[dbo].HOTEL_RES_CHANGES HRC
+    INNER JOIN [ICM_Report_Exports_Core_22Dec].[dbo].HOTEL_EXPORT_REPORTS HER
+        ON HER.RSNNO = HRC.RSNNO
+    WHERE
+        HER.EXDT_RUNTIME = @RunTime
+        AND HER.EXC_REPORT_TYPE = 'C'
+        AND LEN(CAST(HRC.HCC_OLD_VALUE AS VARCHAR(100))) < 20
+) G
+ORDER BY X.RSNNO DESC;
 
-          private void DownloadPdf()
-          {
-               // Example:
-               // /Reports/HotelConfirmation.aspx?EMNNO=12774&HTNNO=23880&RunTime=2025-12-17T09:30:49
-               string emnno = QS("EMNNO");
-               string htnno = QS("HTNNO");
-               string runTimeStr = QS("RunTime");
-
-               DateTime runTime;
-               bool hasRunTime = DateTime.TryParse(runTimeStr, out runTime);
-
-               DataSet ds = GetDataFromSp(
-                   emnno: emnno,
-                   htnno: htnno,
-                   runTime: hasRunTime ? (DateTime?)runTime : null
-               );
-
-               DataTable t0 = (ds.Tables.Count > 0) ? ds.Tables[0] : new DataTable();
-               DataTable t1 = (ds.Tables.Count > 1) ? ds.Tables[1] : new DataTable();
-               DataTable t2 = (ds.Tables.Count > 2) ? ds.Tables[2] : new DataTable();
-
-               // Load RDLC file (same folder as aspx)
-               string rdlcPath = Server.MapPath(Report_PATH);
-
-               LocalReport report = new LocalReport
-               {
-                    ReportPath = rdlcPath
-               };
-
-               report.DataSources.Clear();
-               report.DataSources.Add(new ReportDataSource(DS_ROOMLIST, t0));
-               report.DataSources.Add(new ReportDataSource(DS_CHANGELOG, t1));
-               report.DataSources.Add(new ReportDataSource(DS_HEADER, t2));
-
-               // If your RDLC has parameters later, you can set them here.
-               // report.SetParameters(new ReportParameter("SomeParam", "Value"));
-
-               string mimeType, encoding, extension;
-               Warning[] warnings;
-               string[] streams;
-
-               byte[] pdfBytes = report.Render(
-                   "PDF",
-                   null,
-                   out mimeType,
-                   out encoding,
-                   out extension,
-                   out streams,
-                   out warnings
-               );
-
-               // Download PDF
-               Response.Clear();
-               Response.Buffer = true;
-               Response.ContentType = "application/pdf";
-               Response.AddHeader("Content-Disposition", "attachment; filename=hotelConfirmation.pdf");
-               Response.Cache.SetCacheability(HttpCacheability.NoCache);
-               Response.BinaryWrite(pdfBytes);
-               Response.Flush();
-
-               // avoid ThreadAbortException
-               Context.ApplicationInstance.CompleteRequest();
-          }
-
-          private DataSet GetDataFromSp(string emnno, string htnno, DateTime? runTime)
-          {
-               DataSet ds = new DataSet();
-
-               // Change this connection string name as per your web.config
-               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
-
-               using (SqlConnection con = new SqlConnection(cs))
-               using (SqlCommand cmd = new SqlCommand("dbo.SP_ICM_RoomList_New_Change_Xld_RDLC", con))
-               {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.CommandTimeout = 300;
-
-                    // pass only when present (so SP defaults can work)
-                    if (!string.IsNullOrWhiteSpace(emnno))
-                         cmd.Parameters.Add("@EMNNO", SqlDbType.VarChar, 10).Value = emnno.Trim();
-
-                    if (!string.IsNullOrWhiteSpace(htnno))
-                         cmd.Parameters.Add("@HTNNO", SqlDbType.VarChar, 10).Value = htnno.Trim();
-
-                    if (runTime.HasValue)
-                         cmd.Parameters.Add("@RunTime", SqlDbType.DateTime).Value = runTime.Value;
-
-                    using (SqlDataAdapter da = new SqlDataAdapter(cmd))
-                    {
-                         da.Fill(ds); // table0, table1, table2...
-                    }
-               }
-
-               return ds;
-          }
-
-          private string QS(string key)
-          {
-               return Request.QueryString[key] ?? Request.QueryString[key.ToLowerInvariant()] ?? "";
-          }
-     }
-}
