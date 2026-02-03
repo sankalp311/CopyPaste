@@ -176,3 +176,12 @@ GROUP BY
         REGMST.RGCEMAIL      
   END  
   
+  
+  
+ i want to apply this grouping on data
+ 
+ if isnull ({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCACRO}) then
+    {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCNO}+totext({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBNNO})
+else {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCACRO}+totext({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBNNO})
+these are from crystal report formula
+
