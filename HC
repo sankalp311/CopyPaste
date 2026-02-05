@@ -1,206 +1,110 @@
-
-SELECT       
-        EVENTS.EMNNO,       
-        EVENTS.EMCACRO,      
-        EVENTS.EMCPRO,      
-        HOTELROOMBLOCKS.HBNNO,       
-        HOTELROOMBLOCKS.HBCACRO,       
-        ROOMCATEGORIES.RCCDESC,       
-        HOTELROOMBLOCKS.HBCNO,       
-        HOTELROOMBLOCKS.HBCORG,       
-        HOTELROOMBLOCKS.HBCFNM,       
-        HOTELROOMBLOCKS.HBCLNM,       
-        HOTELROOMBLOCKS.HBCTEL,       
-        HOTELROOMBLOCKS.HBDTSTART,      
-        HOTELROOMBLOCKS.HBDTXLD,         
-        ROOMCATEGORIES.RCCACRO,       
-        HOTEL.HTNNO,       
-        EVENTS.EMDTBEG,       
-        EVENTS.EMDTEND,       
-        EVENTS.EMCNM,       
-        HOTEL.HTCDSC,       
-        HOTELROOMBLOCKS.HBNAPPROVED,       
-        HOTELROOMBLOCKS.HTNNO,       
-  HOTELROOMBLOCKS.HBDTAPPROVED,      
-        HOTEL.EMNNO,       
-        RESERVATIONS.RSNNO,      
-        RESERVATIONS.RSDTARR,      
-        RESERVATIONS.RSDTDEP,      
-        RESERVATIONS.RSDTXLD,      
-        REGMST.RGNNO,      
-        REGMST.RGCNO,      
-        REGMST.RGCPLNM,      
-        REGMST.RGCPFNM,      
-        REGMST.RGCPCITY,      
-        REGMST.RGCPST,      
-        REGMST.RGCEMAIL,      
-        isnull(BLOCK_INVENTORY.Block_Amount_Reserved,0) Block_Total_Amount_Reserved,       
-        isnull(BLOCK_INVENTORY.Block_Remaining_Available,0) Block_Total_Remaining_Available,       
-        isnull(BLOCK_INVENTORY.Block_Adjustments,0) Block_Total_Adjustments,       
-        isnull(BLOCK_INVENTORY.Max_Reserved,0) Block_Max_Reserved,       
-        isnull(BLOCK_INVENTORY.Max_Requested,0) Block_Max_Requested,       
-        isnull(sum(BLOCK_PICKUPS.Block_Pickups),0) Block_Total_Pickups,       
-        isnull(max(BLOCK_PICKUPS.Block_Pickups),0) Block_Max_Pickups,       
-      --  isnull(max(BLOCK_PICKUPS.Block_Pickups),0) Block_Max_Pickups_2,       
-  isnull(max(BLOCK_INVENTORY.BLOCK_RESERVED_ADJUSTED),0) BLOCK_RESERVED_ADJUSTED 
-  , BlockGroupKey =
-    CASE 
-        WHEN NULLIF(LTRIM(RTRIM(HOTELROOMBLOCKS.HBCACRO)), '') IS NULL
-            THEN CAST(HOTELROOMBLOCKS.HBCNO AS varchar(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS varchar(20))
-        ELSE
-            CAST(HOTELROOMBLOCKS.HBCACRO AS varchar(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS varchar(20))
+ALTER PROC dbo.sp_ICM_rpt_DynamicInventoryStatus    
+(    
+      @EOCGROUP  NVARCHAR(100) = N'dynamicinventory'   -- Crystal: 'dynamicinventory'    
+    , @EOCACTION NVARCHAR(10)  = N'1'                  -- Crystal: '0'  (you said action ok)   
+    , @Token varchar(100)= Null
+)    
+AS    
+BEGIN    
+    SET NOCOUNT ON;    
+    DECLARE @encodedstring NVARCHAR(1000);
+    DECLARE @filterString NVARCHAR(1000);
+    DECLARE @filterEOCGROUP NVARCHAR(100);
+    DECLARE @filterEOCACTION NVARCHAR(10);
+    
+    -- Get the encoded string from ReportRequest table
+    SELECT @encodedstring = InnerQueryString 
+    FROM ReportRequest 
+    WHERE Token = @Token;
+    
+    -- If we have the encoded string, parse the Filter parameter
+    IF @encodedstring IS NOT NULL
+    BEGIN
+        -- Extract the Filter parameter value from the encoded string
+        -- The encoded string format appears to be URL-encoded
+        -- Example: 'V=P&Report=YES&RptId=895&EMNNO=20156&sessionid=97324756&Filter=%7BEVENT_OPTIONS.EOCGROUP%7D%3D'dynamicinventory'%20and%20%7BEVENT_OPTIONS.EOCACTION%7D%3D'0''
+        
+        -- First, URL decode the string (replace URL encoded characters)
+        DECLARE @decodedString NVARCHAR(1000);
+        SET @decodedString = @encodedstring;
+        
+        -- Replace common URL encoded characters
+        SET @decodedString = REPLACE(@decodedString, '%7B', '{');
+        SET @decodedString = REPLACE(@decodedString, '%7D', '}');
+        SET @decodedString = REPLACE(@decodedString, '%3D', '=');
+        SET @decodedString = REPLACE(@decodedString, '%20', ' ');
+        SET @decodedString = REPLACE(@decodedString, '%27', '''');
+        
+        -- Extract the Filter parameter value
+        DECLARE @filterStart INT;
+        DECLARE @filterEnd INT;
+        
+        SET @filterStart = CHARINDEX('&Filter=', @decodedString);
+        IF @filterStart > 0
+        BEGIN
+            SET @filterStart = @filterStart + 8; -- Length of '&Filter='
+            SET @filterEnd = CHARINDEX('&', @decodedString, @filterStart);
+            
+            IF @filterEnd = 0
+                SET @filterEnd = LEN(@decodedString) + 1;
+                
+            SET @filterString = SUBSTRING(@decodedString, @filterStart, @filterEnd - @filterStart);
+            
+            -- Parse EOCGROUP from filter string
+            -- Format: {EVENT_OPTIONS.EOCGROUP}='dynamicinventory' and {EVENT_OPTIONS.EOCACTION}='0'
+            DECLARE @groupStart INT;
+            DECLARE @groupEnd INT;
+            
+            SET @groupStart = CHARINDEX('''', @filterString); -- Find first single quote
+            IF @groupStart > 0
+            BEGIN
+                SET @groupEnd = CHARINDEX('''', @filterString, @groupStart + 1);
+                IF @groupEnd > @groupStart
+                    SET @filterEOCGROUP = SUBSTRING(@filterString, @groupStart + 1, @groupEnd - @groupStart - 1);
+            END
+            
+            -- Parse EOCACTION from filter string
+            DECLARE @actionStart INT;
+            DECLARE @actionEnd INT;
+            
+            -- Find the second pair of quotes (for EOCACTION)
+            SET @actionStart = CHARINDEX('''', @filterString, ISNULL(@groupEnd, 0) + 1);
+            IF @actionStart > 0
+            BEGIN
+                SET @actionEnd = CHARINDEX('''', @filterString, @actionStart + 1);
+                IF @actionEnd > @actionStart
+                    SET @filterEOCACTION = SUBSTRING(@filterString, @actionStart + 1, @actionEnd - @actionStart - 1);
+            END
+            
+            -- Override parameters if values were found in the filter
+            IF @filterEOCGROUP IS NOT NULL
+                SET @EOCGROUP = @filterEOCGROUP;
+                
+            IF @filterEOCACTION IS NOT NULL
+                SET @EOCACTION = @filterEOCACTION;
+        END
     END
-
-FROM         
-        HOTEL       
-        LEFT OUTER JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO       
-        LEFT OUTER JOIN RESERVATIONS ON HOTELROOMBLOCKS.HBNNO=RESERVATIONS.HBNNO      
-        LEFT OUTER JOIN REGMST on REGMST.RGNNO=RESERVATIONS.RGNNO      
-        LEFT OUTER JOIN EVENTS ON HOTEL.EMNNO=EVENTS.EMNNO       
-        LEFT OUTER JOIN ROOMCATEGORIES ON HOTELROOMBLOCKS.RCNNO=ROOMCATEGORIES.RCNNO       
-        LEFT OUTER JOIN (       
-                SELECT       
-                        EVENTS.EMNNO,       
-                        HOTELROOMBLOCKS.HBNNO,       
-                        max(RBNAMOUNTREQUESTED) Max_Requested,        
-                        max(RBNAMOUNTRESERVED) Max_Reserved,       
-                        sum(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED) Block_Amount_Reserved,       
-                        sum(HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE) Block_Remaining_Available,       
-                        sum(HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS) Block_Adjustments,       
-      max(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS) BLOCK_RESERVED_ADJUSTED      
-     -- max(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS)-HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE Block_Max_Pickups_2      
-                FROM       
-                        (((       
-                        EVENTS INNER       
-                        JOIN HOTEL ON EVENTS.EMNNO=HOTEL.EMNNO) INNER       
-                        JOIN HOTELROOMBLOCKS  ON       
-                        HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO) INNER JOIN       
-                        HOTELROOMBLOCKINVENTORY ON       
-                        HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO)       
-                WHERE       
-             EVENTS.EMNNO=20156 and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
-                     --   And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'ReservationsCancelled'      
-      And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'CompTournament'      
-      And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'BillingsleyJohn'       
-            
-      --And  EVENTS.EMDTBEG>=@RGDTADD_FROM AND  EVENTS.EMDTBEG <=@RGDTADD_TO      
-                GROUP BY       
-                        EVENTS.EMNNO,      
-                        EVENTS.EMCACRO,      
-                        EVENTS.EMCPRO,      
-                        HOTELROOMBLOCKS.HBNNO      
-                   --     HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE      
-            
-        ) BLOCK_INVENTORY ON EVENTS.EMNNO = BLOCK_INVENTORY.EMNNO       
-        and HOTELROOMBLOCKS.HBNNO = BLOCK_INVENTORY.HBNNO       
-        LEFT OUTER JOIN (       
-                SELECT       
-                        EVENTS.EMNNO,       
-                        RESERVATIONS.HBNNO,       
-                        RESNIGHTS.HINNO,       
-                        count(RESNIGHTS.RSNNO) Block_Pickups       
-                FROM       
-                        (((EVENTS INNER       
-                        JOIN REGMST ON EVENTS.EMNNO=REGMST.EMNNO) INNER       
-                        JOIN RESERVATIONS ON       
-                        REGMST.RGNNO=RESERVATIONS.RGNNO       
-                                AND RESERVATIONS.RSDTXLD is NULL       
-                                AND NOT RESERVATIONS.HBNNO is NULL) INNER JOIN       
-                        RESNIGHTS ON       
-                        RESERVATIONS.RSNNO=RESNIGHTS.RSNNO)       
-                WHERE       
-                        EVENTS.EMNNO=20156       
-                        --And RESERVATIONS.RSDTXLD is null      
-                GROUP BY       
-                        EVENTS.EMNNO,      
-                        EVENTS.EMCACRO,      
-                        EVENTS.EMCPRO,      
-                        RESERVATIONS.HBNNO,       
-                        RESNIGHTS.HINNO       
-        ) BLOCK_PICKUPS ON EVENTS.EMNNO = BLOCK_PICKUPS.EMNNO       
-                and HOTELROOMBLOCKS.HBNNO = BLOCK_PICKUPS.HBNNO       
-WHERE       
-        EVENTS.EMNNO = 20156 and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
-              
-              
-    -- And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'ReservationsCancelled'      
-  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'      
-  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'       
-  --And RESERVATIONS.RSDTXLD is null      
-  --And  EVENTS.EMDTBEG>=@RGDTADD_FROM AND  EVENTS.EMDTBEG <=@RGDTADD_TO  
-    and HOTEL.HTNNO=185889
-              
-GROUP BY       
-        EVENTS.EMNNO,       
-        EVENTS.EMCACRO,      
-        EVENTS.EMCPRO,      
-        HOTELROOMBLOCKS.HBNNO,       
-        HOTELROOMBLOCKS.HBCACRO,       
-        ROOMCATEGORIES.RCCDESC,       
-        HOTELROOMBLOCKS.HBCNO,       
-        HOTELROOMBLOCKS.HBCORG,       
-        HOTELROOMBLOCKS.HBCFNM,       
-        HOTELROOMBLOCKS.HBCLNM,       
-        HOTELROOMBLOCKS.HBCTEL,       
-        HOTELROOMBLOCKS.HBDTSTART,       
-        ROOMCATEGORIES.RCCACRO,       
-        HOTEL.HTNNO,       
-        EVENTS.EMDTBEG,       
-        EVENTS.EMDTEND,       
-        EVENTS.EMCNM,       
-        HOTEL.HTCDSC,       
-        HOTELROOMBLOCKS.HBNAPPROVED,       
-        HOTELROOMBLOCKS.HBDTXLD,      
-        HOTELROOMBLOCKS.HTNNO,      
-  HOTELROOMBLOCKS.HBDTAPPROVED,       
-        HOTEL.EMNNO,       
-              
-        isnull(BLOCK_INVENTORY.Block_Amount_Reserved,0),       
-        isnull(BLOCK_INVENTORY.Block_Remaining_Available,0),       
-        isnull(BLOCK_INVENTORY.Block_Adjustments,0),       
-        isnull(BLOCK_INVENTORY.Max_Reserved,0),       
-        isnull(BLOCK_INVENTORY.Max_Requested,0),      
-      
-  RESERVATIONS.RSNNO,      
-  RESERVATIONS.RSDTARR,      
-        RESERVATIONS.RSDTDEP,      
-        RESERVATIONS.RSDTXLD,      
-        REGMST.RGNNO,      
-        REGMST.RGCNO,      
-        REGMST.RGCPLNM,      
-        REGMST.RGCPFNM,      
-        REGMST.RGCPCITY,      
-        REGMST.RGCPST,      
-        REGMST.RGCEMAIL  
-		ORDER BY
-    CASE 
-        WHEN NULLIF(LTRIM(RTRIM(HOTELROOMBLOCKS.HBCACRO)), '') IS NULL
-            THEN CAST(HOTELROOMBLOCKS.HBCNO AS varchar(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS varchar(20))
-        ELSE
-            CAST(HOTELROOMBLOCKS.HBCACRO AS varchar(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS varchar(20))
-    END,
-    RESERVATIONS.RSNNO
-
-  above is my sql 
-  
-  these are the guouping used in crystal i want exact count like crystal in my rdlc report so make it happen
-  
-  EventSort
-  {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.EMCACRO}+TOTEXT({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.EMNNO})
-  
-  HotelSort
-  {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HTCDSC}+Totext ({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HTNNO})
-  
-  SubBlk_Sort
-  if isnull ({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCACRO}) then
-    {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCNO}+totext({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBNNO})
-else {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBCACRO}+totext({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBNNO})
-
-NameSort
-{sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.RGCPLNM}+
-{sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.RGCPFNM}+
-totext({sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.RSNNO})
-
-  
-  
-
+    
+    -- Debug output (remove in production)
+    -- PRINT 'Using EOCGROUP: ' + @EOCGROUP;
+    -- PRINT 'Using EOCACTION: ' + @EOCACTION;
+    
+    SELECT    
+          E.EMCNO    
+        , E.EMCNM    
+        , EO.EOCGROUP    
+        , EO.EOCACTION    
+        , E.EMDTBEG    
+        , DynamicInventoryStatus =    
+            CASE    
+                WHEN LTRIM(RTRIM(CONVERT(NVARCHAR(10), EO.EOCACTION))) <> N'1'    
+                    THEN N'No Access'    
+                ELSE N'Access Allowed'    
+            END    
+    FROM dbo.EVENTS AS E    
+    LEFT OUTER JOIN dbo.EVENT_OPTIONS AS EO    
+        ON E.EMNNO = EO.EMNNO    
+    WHERE EO.EOCGROUP  = @EOCGROUP    
+      AND EO.EOCACTION = @EOCACTION    
+    ORDER BY EO.EOCACTION DESC;   -- same as Crystal    
+END
