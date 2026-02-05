@@ -1,110 +1,63 @@
-ALTER PROC dbo.sp_ICM_rpt_DynamicInventoryStatus    
-(    
-      @EOCGROUP  NVARCHAR(100) = N'dynamicinventory'   -- Crystal: 'dynamicinventory'    
-    , @EOCACTION NVARCHAR(10)  = N'1'                  -- Crystal: '0'  (you said action ok)   
-    , @Token varchar(100)= Null
-)    
-AS    
-BEGIN    
-    SET NOCOUNT ON;    
-    DECLARE @encodedstring NVARCHAR(1000);
-    DECLARE @filterString NVARCHAR(1000);
-    DECLARE @filterEOCGROUP NVARCHAR(100);
-    DECLARE @filterEOCACTION NVARCHAR(10);
-    
-    -- Get the encoded string from ReportRequest table
-    SELECT @encodedstring = InnerQueryString 
-    FROM ReportRequest 
-    WHERE Token = @Token;
-    
-    -- If we have the encoded string, parse the Filter parameter
-    IF @encodedstring IS NOT NULL
-    BEGIN
-        -- Extract the Filter parameter value from the encoded string
-        -- The encoded string format appears to be URL-encoded
-        -- Example: 'V=P&Report=YES&RptId=895&EMNNO=20156&sessionid=97324756&Filter=%7BEVENT_OPTIONS.EOCGROUP%7D%3D'dynamicinventory'%20and%20%7BEVENT_OPTIONS.EOCACTION%7D%3D'0''
-        
-        -- First, URL decode the string (replace URL encoded characters)
-        DECLARE @decodedString NVARCHAR(1000);
-        SET @decodedString = @encodedstring;
-        
-        -- Replace common URL encoded characters
-        SET @decodedString = REPLACE(@decodedString, '%7B', '{');
-        SET @decodedString = REPLACE(@decodedString, '%7D', '}');
-        SET @decodedString = REPLACE(@decodedString, '%3D', '=');
-        SET @decodedString = REPLACE(@decodedString, '%20', ' ');
-        SET @decodedString = REPLACE(@decodedString, '%27', '''');
-        
-        -- Extract the Filter parameter value
-        DECLARE @filterStart INT;
-        DECLARE @filterEnd INT;
-        
-        SET @filterStart = CHARINDEX('&Filter=', @decodedString);
-        IF @filterStart > 0
-        BEGIN
-            SET @filterStart = @filterStart + 8; -- Length of '&Filter='
-            SET @filterEnd = CHARINDEX('&', @decodedString, @filterStart);
-            
-            IF @filterEnd = 0
-                SET @filterEnd = LEN(@decodedString) + 1;
-                
-            SET @filterString = SUBSTRING(@decodedString, @filterStart, @filterEnd - @filterStart);
-            
-            -- Parse EOCGROUP from filter string
-            -- Format: {EVENT_OPTIONS.EOCGROUP}='dynamicinventory' and {EVENT_OPTIONS.EOCACTION}='0'
-            DECLARE @groupStart INT;
-            DECLARE @groupEnd INT;
-            
-            SET @groupStart = CHARINDEX('''', @filterString); -- Find first single quote
-            IF @groupStart > 0
-            BEGIN
-                SET @groupEnd = CHARINDEX('''', @filterString, @groupStart + 1);
-                IF @groupEnd > @groupStart
-                    SET @filterEOCGROUP = SUBSTRING(@filterString, @groupStart + 1, @groupEnd - @groupStart - 1);
-            END
-            
-            -- Parse EOCACTION from filter string
-            DECLARE @actionStart INT;
-            DECLARE @actionEnd INT;
-            
-            -- Find the second pair of quotes (for EOCACTION)
-            SET @actionStart = CHARINDEX('''', @filterString, ISNULL(@groupEnd, 0) + 1);
-            IF @actionStart > 0
-            BEGIN
-                SET @actionEnd = CHARINDEX('''', @filterString, @actionStart + 1);
-                IF @actionEnd > @actionStart
-                    SET @filterEOCACTION = SUBSTRING(@filterString, @actionStart + 1, @actionEnd - @actionStart - 1);
-            END
-            
-            -- Override parameters if values were found in the filter
-            IF @filterEOCGROUP IS NOT NULL
-                SET @EOCGROUP = @filterEOCGROUP;
-                
-            IF @filterEOCACTION IS NOT NULL
-                SET @EOCACTION = @filterEOCACTION;
-        END
-    END
-    
-    -- Debug output (remove in production)
-    -- PRINT 'Using EOCGROUP: ' + @EOCGROUP;
-    -- PRINT 'Using EOCACTION: ' + @EOCACTION;
-    
-    SELECT    
-          E.EMCNO    
-        , E.EMCNM    
-        , EO.EOCGROUP    
-        , EO.EOCACTION    
-        , E.EMDTBEG    
-        , DynamicInventoryStatus =    
-            CASE    
-                WHEN LTRIM(RTRIM(CONVERT(NVARCHAR(10), EO.EOCACTION))) <> N'1'    
-                    THEN N'No Access'    
-                ELSE N'Access Allowed'    
-            END    
-    FROM dbo.EVENTS AS E    
-    LEFT OUTER JOIN dbo.EVENT_OPTIONS AS EO    
-        ON E.EMNNO = EO.EMNNO    
-    WHERE EO.EOCGROUP  = @EOCGROUP    
-      AND EO.EOCACTION = @EOCACTION    
-    ORDER BY EO.EOCACTION DESC;   -- same as Crystal    
-END
+Crystal report sql
+
+	SELECT "EVENTS"."EMNNO", "HOTEL"."HTCDSC", "EVENTS"."EMCNM", "HOTEL"."HTNNO", "EVENTS"."EMDTBEG", "EVENTS"."EMDTEND", "ROOMTYPES"."RTCACRO", "HOTELROOMTYPECOSTS"."HCNCOST", "HOTELROOMTYPECOSTS"."HCNDEPOSIT", "ROOMCATEGORIES"."RCCACRO", "RESERVATIONS"."HTNNO", "ROOMCATEGORIES"."RCNNO", "HOTEL"."HTCACCTYPE", "RESERVATIONS"."RSDTARR", "RESERVATIONS"."RSDTDEP", "RESERVATIONS"."RSNNO", "RESERVATIONS"."RSDTXLD", "HOTELROOMTYPECOSTS"."HCNSVCCHG", "HOTEL"."HTCACRO"
+ FROM   (((((("ICM"."dbo"."EVENTS" "EVENTS" LEFT OUTER JOIN "ICM"."dbo"."HOTEL" "HOTEL" ON "EVENTS"."EMNNO"="HOTEL"."EMNNO") LEFT OUTER JOIN "ICM"."dbo"."HOTELROOMCATEGORIES" "HOTELROOMCATEGORIES" ON "HOTEL"."HTNNO"="HOTELROOMCATEGORIES"."HTNNO") LEFT OUTER JOIN "ICM"."dbo"."HOTELINVENTORY" "HOTELINVENTORY" ON "HOTELROOMCATEGORIES"."HRNNO"="HOTELINVENTORY"."HRNNO") LEFT OUTER JOIN "ICM"."dbo"."RESERVATIONS" "RESERVATIONS" ON ("HOTELROOMCATEGORIES"."HTNNO"="RESERVATIONS"."HTNNO") AND ("HOTELROOMCATEGORIES"."RCNNO"="RESERVATIONS"."RCNNO")) LEFT OUTER JOIN "ICM"."dbo"."ROOMCATEGORIES" "ROOMCATEGORIES" ON "HOTELROOMCATEGORIES"."RCNNO"="ROOMCATEGORIES"."RCNNO") LEFT OUTER JOIN "ICM"."dbo"."HOTELROOMTYPECOSTS" "HOTELROOMTYPECOSTS" ON "HOTELINVENTORY"."HINNO"="HOTELROOMTYPECOSTS"."HINNO") LEFT OUTER JOIN "ICM"."dbo"."ROOMTYPES" "ROOMTYPES" ON "HOTELROOMTYPECOSTS"."RTNNO"="ROOMTYPES"."RTNNO"
+ WHERE  "EVENTS"."EMNNO"=20156
+ ORDER BY "EVENTS"."EMNNO"
+
+
+
+formula used in same crystal report
+
+DepositRmNights
+if isnull ({RESERVATIONS.RSNNO}) then
+    0
+else if {HOTEL.HTCACCTYPE}='DA'  and isnull ({RESERVATIONS.RSDTXLD}) then
+   {RESERVATIONS.RSDTDEP}-{RESERVATIONS.RSDTARR}
+else 0
+
+
+HotelSort
+If {HOTEL.HTCACRO}='Request' then
+    'zzz'+{HOTEL.HTCDSC}+totext({HOTEL.HTNNO})
+
+else  {HOTEL.HTCDSC}+totext({HOTEL.HTNNO})
+
+
+
+HoteName
+{HOTEL.HTCDSC}
+
+
+RoomType
+if isnull ({ROOMCATEGORIES.RCCACRO}) then
+    'N/A'
+else {ROOMCATEGORIES.RCCACRO}
+
+
+
+RoomTypeSort
+{ROOMCATEGORIES.RCCACRO}+ totext({ROOMCATEGORIES.RCNNO})
+
+
+TotalRmNights
+if isnull ({RESERVATIONS.RSNNO}) then
+    0
+else if isnull ({RESERVATIONS.RSDTXLD}) then
+   {RESERVATIONS.RSDTDEP}-{RESERVATIONS.RSDTARR}
+else 0
+
+
+
+
+
+
+
+
+Now gpt you need to create my rdlc sp for this report and remember order and datacount should be same.
+
+and i dont want to use too muchnages on rdlc so do it all in sp side for my rdlc report
+
+use formula , sorting,grouping in sp and odnt use cte
+
+please write the correct sp for me now.
