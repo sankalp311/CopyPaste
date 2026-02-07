@@ -1,178 +1,184 @@
-ALTER PROCEDURE sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams_RDLC     
-@EMNNO int        
-As        
-/*      
-Created By : Pravendra      
-Created on :02-02-2026      
-Description :Get report data for TT-BlkDtl-Res      
-*/     
-BEGIN      
-Set NoCount On         
-SET ANSI_WARNINGS OFF         
-        
-SELECT         
-        EVENTS.EMNNO,         
-        EVENTS.EMCACRO,        
-        EVENTS.EMCPRO,        
-        HOTELROOMBLOCKS.HBNNO,         
-        HOTELROOMBLOCKS.HBCACRO,         
-        ROOMCATEGORIES.RCCDESC,         
-        HOTELROOMBLOCKS.HBCNO,         
-        HOTELROOMBLOCKS.HBCORG,         
-        HOTELROOMBLOCKS.HBCFNM,         
-        HOTELROOMBLOCKS.HBCLNM,         
-        HOTELROOMBLOCKS.HBCTEL,         
-        HOTELROOMBLOCKS.HBDTSTART,        
-        HOTELROOMBLOCKS.HBDTXLD,           
-        ROOMCATEGORIES.RCCACRO,         
-        HOTEL.HTNNO,         
-        EVENTS.EMDTBEG,         
-        EVENTS.EMDTEND,         
-        EVENTS.EMCNM,         
-        HOTEL.HTCDSC,         
-        HOTELROOMBLOCKS.HBNAPPROVED,         
-        HOTELROOMBLOCKS.HTNNO as HTNNO2,         
-        HOTELROOMBLOCKS.HBDTAPPROVED,        
-       -- HOTEL.EMNNO,         
-        RESERVATIONS.RSNNO,        
-        RESERVATIONS.RSDTARR,        
-        RESERVATIONS.RSDTDEP,        
-        RESERVATIONS.RSDTXLD,        
-        REGMST.RGNNO,        
-        REGMST.RGCNO,        
-        REGMST.RGCPLNM,        
-        REGMST.RGCPFNM,        
-        REGMST.RGCPCITY,        
-        REGMST.RGCPST,        
-        REGMST.RGCEMAIL,        
-        isnull(BLOCK_INVENTORY.Block_Amount_Reserved,0) Block_Total_Amount_Reserved,         
-        isnull(BLOCK_INVENTORY.Block_Remaining_Available,0) Block_Total_Remaining_Available,         
-        isnull(BLOCK_INVENTORY.Block_Adjustments,0) Block_Total_Adjustments,         
-        isnull(BLOCK_INVENTORY.Max_Reserved,0) Block_Max_Reserved,         
-        isnull(BLOCK_INVENTORY.Max_Requested,0) Block_Max_Requested,         
-        isnull(sum(BLOCK_PICKUPS.Block_Pickups),0) Block_Total_Pickups,         
-        isnull(max(BLOCK_PICKUPS.Block_Pickups),0) Block_Max_Pickups,         
-       isnull(max(BLOCK_INVENTORY.BLOCK_RESERVED_ADJUSTED),0) BLOCK_RESERVED_ADJUSTED        ,
-	    CASE 
-		 WHEN HOTELROOMBLOCKS.HBCACRO IS NULL THEN 
-			HOTELROOMBLOCKS.HBCNO	+
-			Cast(HOTELROOMBLOCKS.HBNNO as varchar)
-			ELSE HOTELROOMBLOCKS.HBCACRO	+
-			Cast(HOTELROOMBLOCKS.HBNNO as varchar)
-			END  [SortKey]
-FROM           
-        HOTEL         
-        LEFT OUTER JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO         
-        LEFT OUTER JOIN RESERVATIONS ON HOTELROOMBLOCKS.HBNNO=RESERVATIONS.HBNNO        
-        LEFT OUTER JOIN REGMST on REGMST.RGNNO=RESERVATIONS.RGNNO        
-        LEFT OUTER JOIN EVENTS ON HOTEL.EMNNO=EVENTS.EMNNO         
-        LEFT OUTER JOIN ROOMCATEGORIES ON HOTELROOMBLOCKS.RCNNO=ROOMCATEGORIES.RCNNO         
-        LEFT OUTER JOIN (         
-                SELECT         
-                        EVENTS.EMNNO,         
-                        HOTELROOMBLOCKS.HBNNO,         
-                        max(RBNAMOUNTREQUESTED) Max_Requested,          
-                        max(RBNAMOUNTRESERVED) Max_Reserved,         
-                        sum(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED) Block_Amount_Reserved,         
-                        sum(HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE) Block_Remaining_Available,         
-                        sum(HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS) Block_Adjustments,         
-                        max(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS) BLOCK_RESERVED_ADJUSTED        
-                FROM         
-                        (((         
-                        EVENTS INNER         
-                        JOIN HOTEL ON EVENTS.EMNNO=HOTEL.EMNNO) INNER         
-                        JOIN HOTELROOMBLOCKS  ON         
-                        HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO) INNER JOIN         
-                        HOTELROOMBLOCKINVENTORY ON         
-                        HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO)         
-                WHERE         
-                        EVENTS.EMNNO=@EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1        
-      And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'CompTournament'        
-      And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'BillingsleyJohn'         
-                GROUP BY         
-                        EVENTS.EMNNO,        
-                        EVENTS.EMCACRO,        
-                        EVENTS.EMCPRO,        
-                        HOTELROOMBLOCKS.HBNNO        
-        ) BLOCK_INVENTORY ON EVENTS.EMNNO = BLOCK_INVENTORY.EMNNO         
-        and HOTELROOMBLOCKS.HBNNO = BLOCK_INVENTORY.HBNNO         
-        LEFT OUTER JOIN (         
-                SELECT         
-                        EVENTS.EMNNO,         
-                        RESERVATIONS.HBNNO,         
-                        RESNIGHTS.HINNO,         
-                        count(RESNIGHTS.RSNNO) Block_Pickups         
-                FROM         
-                        (((EVENTS INNER         
-                        JOIN REGMST ON EVENTS.EMNNO=REGMST.EMNNO) INNER         
-                        JOIN RESERVATIONS ON         
-                        REGMST.RGNNO=RESERVATIONS.RGNNO         
-                                AND RESERVATIONS.RSDTXLD is NULL         
-                                AND NOT RESERVATIONS.HBNNO is NULL) INNER JOIN         
-                        RESNIGHTS ON         
-                        RESERVATIONS.RSNNO=RESNIGHTS.RSNNO)         
-                WHERE         
-                        EVENTS.EMNNO=@EMNNO         
-                GROUP BY         
-                        EVENTS.EMNNO,        
-                        EVENTS.EMCACRO,        
-                        EVENTS.EMCPRO,        
-                        RESERVATIONS.HBNNO,         
-                        RESNIGHTS.HINNO         
-        ) BLOCK_PICKUPS ON EVENTS.EMNNO = BLOCK_PICKUPS.EMNNO         
-                and HOTELROOMBLOCKS.HBNNO = BLOCK_PICKUPS.HBNNO         
-WHERE         
-  EVENTS.EMNNO = @EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1           
-  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'        
-  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'  
+CREATE PROCEDURE dbo.TT_EIRExp  
+/******************************************************************************************  
+-- Author      : Sankalp Mishra  
+-- Company     : Jsimple  
+-- Project     : ICM (Crystal to RDLC Conversion)  
+-- File Name   : rpt_TT_EconomicImpact_Summary.sql  
+--  
+-- Description :  
+--   Hotel-level summary for "Economic Impact Report" (RDLC),  
+--   using the same logic as the Crystal report.  
+--  
+--   Base dataset = Crystal SQL:  
+--     RESNIGHTS  
+--       INNER JOIN ( EVENTS  
+--                    INNER JOIN REGMST  
+--                    INNER JOIN RESERVATIONS )   
+--       INNER JOIN HOTELINVENTORY  
+--       INNER JOIN HOTEL  
+--       LEFT  JOIN ROOMTYPES  
+--       INNER JOIN ROOMCATEGORIES  
+--  
+--   Record selection:  
+--     EVENTS.EMNNO = @EMNNO  
+--     AND RESERVATIONS.RSDTXLD IS NULL       -- isnull({RESERVATIONS.RSDTXLD})  
+--  
+--   Step 1: Per reservation (@NameRegno) within each hotel:  
+--     NbrNitesPerRes   = RSDTDEP - RSDTARR  
+--     RevenuePerRes    = Sum(RNMPERNIGHTCHARGE, NameRegno)  
+--  
+--   Step 2: Per hotel (@HotelSort):  
+--     Pickup           = Sum(NbrNitesPerRes)  
+--     HotelRevenue     = Sum(RevenuePerRes)  
+--     AvgRate-Hotel    = HotelRevenue / Pickup  
+--  
+--   Event-level:  
+--     DisplayResCountEvent = COUNT(DISTINCT RSNNO)   -- #RunResCountEvent  
+--  
+--   Output: ONE ROW PER HOTEL.  
+******************************************************************************************/  
+    @EMNNO INT  
+AS  
+BEGIN  
+    SET NOCOUNT ON;  
   
-
-                
-GROUP BY         
-        EVENTS.EMNNO,         
-        EVENTS.EMCACRO,        
-        EVENTS.EMCPRO,        
-        HOTELROOMBLOCKS.HBNNO,         
-        HOTELROOMBLOCKS.HBCACRO,         
-        ROOMCATEGORIES.RCCDESC,         
-        HOTELROOMBLOCKS.HBCNO,         
-        HOTELROOMBLOCKS.HBCORG,         
-        HOTELROOMBLOCKS.HBCFNM,         
-        HOTELROOMBLOCKS.HBCLNM,         
-        HOTELROOMBLOCKS.HBCTEL,         
-        HOTELROOMBLOCKS.HBDTSTART,         
-        ROOMCATEGORIES.RCCACRO,         
-        HOTEL.HTNNO,         
-        EVENTS.EMDTBEG,         
-        EVENTS.EMDTEND,         
-        EVENTS.EMCNM,         
-        HOTEL.HTCDSC,         
-        HOTELROOMBLOCKS.HBNAPPROVED,         
-        HOTELROOMBLOCKS.HBDTXLD,        
-        HOTELROOMBLOCKS.HTNNO,        
-        HOTELROOMBLOCKS.HBDTAPPROVED,         
-        HOTEL.EMNNO,         
-        isnull(BLOCK_INVENTORY.Block_Amount_Reserved,0),         
-        isnull(BLOCK_INVENTORY.Block_Remaining_Available,0),         
-        isnull(BLOCK_INVENTORY.Block_Adjustments,0),         
-        isnull(BLOCK_INVENTORY.Max_Reserved,0),         
-        isnull(BLOCK_INVENTORY.Max_Requested,0),        
-        RESERVATIONS.RSNNO,        
-        RESERVATIONS.RSDTARR,        
-        RESERVATIONS.RSDTDEP,        
-        RESERVATIONS.RSDTXLD,        
-        REGMST.RGNNO,        
-        REGMST.RGCNO,        
-        REGMST.RGCPLNM,        
-        REGMST.RGCPFNM,        
-        REGMST.RGCPCITY,        
-        REGMST.RGCPST,        
-        REGMST.RGCEMAIL  ,
-		CASE 
-		 WHEN HOTELROOMBLOCKS.HBCACRO IS NULL THEN 
-			HOTELROOMBLOCKS.HBCNO	+
-			Cast(HOTELROOMBLOCKS.HBNNO as varchar)
-			ELSE HOTELROOMBLOCKS.HBCACRO	+
-			Cast(HOTELROOMBLOCKS.HBNNO as varchar)
-			END
-  END
+    ----------------------------------------------------------------------------  
+    -- 1) RAW CTE = EXACT Crystal recordset (DISTINCT + same joins + filter)  
+    ----------------------------------------------------------------------------  
+    ;WITH Raw AS  
+    (  
+        SELECT DISTINCT  
+            rm.RGCPLNM,  
+            rm.RGCPFNM,  
+            rm.RGNNO,  
+            e.EMNNO,  
+            e.EMCNM,  
+            r.RSNNO,  
+            r.RSDTARR,  
+            r.RSDTDEP,  
+            r.RSDTXLD,  
+            --rc.RCCACRO,  
+            h.HTCDSC,  
+            rn.RNMPERNIGHTCHARGE,  
+            hi.HIDATE,  
+            --rt.RTCACRO,  
+            r.RSCCCTYPE,  
+            h.HTNNO,  
+            rn.HINNO,  
+            e.EMDTBEG,  
+            e.EMDTEND  
+        FROM ICM.dbo.RESNIGHTS       rn  
+        INNER JOIN ICM.dbo.RESERVATIONS  r   ON rn.RSNNO = r.RSNNO  
+        INNER JOIN ICM.dbo.REGMST        rm  ON rm.RGNNO = r.RGNNO  
+        INNER JOIN ICM.dbo.EVENTS        e   ON e.EMNNO = rm.EMNNO  
+        INNER JOIN ICM.dbo.HOTELINVENTORY hi ON rn.HINNO = hi.HINNO  
+        INNER JOIN ICM.dbo.HOTEL         h   ON r.HTNNO = h.HTNNO  
+        --INNER  JOIN ICM.dbo.ROOMTYPES     rt  ON r.RTNNO = rt.RTNNO  
+        --INNER JOIN ICM.dbo.ROOMCATEGORIES rc ON r.RCNNO = rc.RCNNO  
+        WHERE  
+            e.EMNNO = @EMNNO  
+             AND r.RSDTXLD IS NOT NULL              -- isnull({RESERVATIONS.RSDTXLD})  
+    ),  
+  
+    ----------------------------------------------------------------------------  
+    -- 2) Per-reservation aggregation (Crystal @NameRegno level)  
+    ----------------------------------------------------------------------------  
+    ResAgg AS  
+    (  
+        SELECT  
+            -- keys  
+            r.EMNNO,  
+            r.EMCNM,  
+            r.HTNNO,  
+            r.HTCDSC,  
+            r.RSNNO,  
+            r.RGNNO,  
+  
+            -- hotel / event dates (same for all rows in group)  
+            EMDTBEG = MAX(r.EMDTBEG),  
+            EMDTEND = MAX(r.EMDTEND),  
+  
+            -- NbrNites = RSDTDEP - RSDTARR  
+            NbrNitesPerRes =  
+                DATEDIFF(DAY, MIN(r.RSDTARR), MAX(r.RSDTDEP)),  
+  
+            -- Revenue per reservation = Sum(RNMPERNIGHTCHARGE, NameRegno)  
+            RevenuePerRes =  
+                SUM(ISNULL(r.RNMPERNIGHTCHARGE, 0.0))  
+        FROM Raw r  
+        GROUP BY  
+            r.EMNNO,  
+            r.EMCNM,  
+            r.HTNNO,  
+            r.HTCDSC,  
+            r.RSNNO,  
+            r.RGNNO  
+    ),  
+  
+    ----------------------------------------------------------------------------  
+    -- 3) Hotel-level aggregation (Crystal @HotelSort group)  
+    ----------------------------------------------------------------------------  
+    HotelAgg AS  
+    (  
+        SELECT  
+            EMNNO,  
+            EMCNM       = MAX(EMCNM),  
+            HTNNO,  
+            HTCDSC      = MAX(HTCDSC),  
+            EMDTBEG     = MAX(EMDTBEG),  
+            EMDTEND     = MAX(EMDTEND),  
+  
+            -- Pickup = Sum of NbrNitesPerRes (RunResNites at Hotel group)  
+            Pickup      = SUM(ISNULL(NbrNitesPerRes, 0)),  
+  
+            -- HotelRevenue = Sum of RevenuePerRes (RunRevenue-Hotel)  
+            HotelRevenue = SUM(ISNULL(RevenuePerRes, 0.0))  
+        FROM ResAgg  
+        GROUP BY  
+            EMNNO,  
+            HTNNO  
+    ),  
+  
+    ----------------------------------------------------------------------------  
+    -- 4) Event-level reservation count (DisplayResCountEvent / RunResCountEvent)  
+    ----------------------------------------------------------------------------  
+    EventAgg AS  
+    (  
+        SELECT  
+            EMNNO,  
+            DisplayResCountEvent = COUNT(DISTINCT RSNNO)  
+        FROM ResAgg  
+        GROUP BY EMNNO  
+    )  
+  
+    ----------------------------------------------------------------------------  
+    -- 5) Final result – ONE ROW PER HOTEL  
+    ----------------------------------------------------------------------------  
+    SELECT  
+        h.EMNNO,  
+        h.EMCNM,  
+        h.HTNNO,  
+        h.HTCDSC,  
+        -- Crystal prints dates via formatting; here we send MM/dd/yyyy strings  
+        CONVERT(varchar(10), h.EMDTBEG, 101) AS EMDTBEG,  
+        CONVERT(varchar(10), h.EMDTEND, 101) AS EMDTEND,  
+        h.Pickup,  
+  
+        -- AvgRate-Hotel = HotelRevenue / Pickup  
+        AvgRate_Hotel =  
+            CASE  
+                WHEN h.Pickup = 0 THEN 0  
+                ELSE CAST(h.HotelRevenue AS decimal(18,2))  
+                     / NULLIF(h.Pickup, 0)  
+            END,  
+  
+        h.HotelRevenue,  
+        ISNULL(e.DisplayResCountEvent, 0) AS DisplayResCountEvent  
+    FROM HotelAgg h  
+    LEFT JOIN EventAgg e  
+        ON e.EMNNO = h.EMNNO  
+    ORDER BY  
+        h.EMNNO,  
+        UPPER(LTRIM(RTRIM(h.HTCDSC))),  
+        h.HTNNO;  
+END;  
