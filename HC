@@ -1,185 +1,222 @@
-CREATE   PROCEDURE dbo.sp_ICM_RPT_HotelRoomRatesAndDeposits_RDLC  
-(  
-    @EMNNO INT = null  
-)  
-AS  
-BEGIN  
-    SET NOCOUNT ON;  
-  
-    SELECT  
-        /* ===== PK IDs (only 3) ===== */  
-        H.HTNNO,  
-        RC.RCNNO,  
-        RT.RTNNO,  
-  
-        /* ===== Group 1 fields ===== */  
-        E.EMNNO,  
-        E.EMCNM,  
-        E.EMDTBEG,  
-        E.EMDTEND,  
-  
-        /* ===== Hotel display + Group 2 key ===== */  
-        H.HTCDSC,  
-        HotelSort =  
-            CASE  
-                WHEN H.HTCACRO = 'Request'  
-                    THEN 'zzz' + H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                ELSE  
-                    H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-            END,  
-  
-        /* ===== RoomType display + Group 3 key ===== */  
-        RoomType =  
-            CASE  
-                WHEN RC.RCCACRO IS NULL THEN 'N/A'  
-                ELSE RC.RCCACRO  
-            END,  
-  
-        RoomTypeSort =  
-            (CASE WHEN RC.RCCACRO IS NULL THEN 'N/A' ELSE RC.RCCACRO END)  
-            + CONVERT(VARCHAR(20), ISNULL(RC.RCNNO, 0)),  
-  
-        /* ===== Detail display ===== */  
-        RT.RTCACRO,  
-  
-        /* ===== Crystal formulas (row level) ===== */  
-        TotalRmNights =  
-            CASE  
-                WHEN R.RSNNO IS NULL THEN 0  
-                WHEN R.RSDTXLD IS NULL  
-                    THEN DATEDIFF(DAY, CONVERT(DATE, R.RSDTARR), CONVERT(DATE, R.RSDTDEP))  
-                ELSE 0  
-            END,  
-  
-        DepositRmNights =  
-            CASE  
-                WHEN R.RSNNO IS NULL THEN 0  
-                WHEN H.HTCACCTYPE = 'DA' AND R.RSDTXLD IS NULL  
-                    THEN DATEDIFF(DAY, CONVERT(DATE, R.RSDTARR), CONVERT(DATE, R.RSDTDEP))  
-                ELSE 0  
-            END,  
-  
-        /* ===== Show cost/deposit/svc only ONCE per (Event+HotelSort+RoomTypeSort) ===== */  
-        FirstNightCost =  
-            CASE WHEN  
-                HI.HIDATE = MIN(HI.HIDATE) OVER (  
-                    PARTITION BY  
-                        E.EMNNO,  
-                        CASE  
-                            WHEN H.HTCACRO = 'Request'  
-                                THEN 'zzz' + H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                            ELSE  
-                                H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                        END,  
-                        (CASE WHEN RC.RCCACRO IS NULL THEN 'N/A' ELSE RC.RCCACRO END)  
-                        + CONVERT(VARCHAR(20), ISNULL(RC.RCNNO, 0))  
-                )  
-            THEN HRTC.HCNCOST END,  
-  
-        FirstNightDeposit =  
-            CASE WHEN  
-                HI.HIDATE = MIN(HI.HIDATE) OVER (  
-                    PARTITION BY  
-                        E.EMNNO,  
-                        CASE  
-                            WHEN H.HTCACRO = 'Request'  
-                                THEN 'zzz' + H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                            ELSE  
-                                H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                        END,  
-                        (CASE WHEN RC.RCCACRO IS NULL THEN 'N/A' ELSE RC.RCCACRO END)  
-                        + CONVERT(VARCHAR(20), ISNULL(RC.RCNNO, 0))  
-                )  
-            THEN HRTC.HCNDEPOSIT END,  
-  
-        FirstNightSvcChg =  
-            CASE WHEN  
-                HI.HIDATE = MIN(HI.HIDATE) OVER (  
-                    PARTITION BY  
-                        E.EMNNO,  
-                        CASE  
-                            WHEN H.HTCACRO = 'Request'  
-                                THEN 'zzz' + H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                            ELSE  
-                                H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                        END,  
-                        (CASE WHEN RC.RCCACRO IS NULL THEN 'N/A' ELSE RC.RCCACRO END)  
-                        + CONVERT(VARCHAR(20), ISNULL(RC.RCNNO, 0))  
-                )  
-            THEN HRTC.HCNSVCCHG END,  
-  
-        /* ===== Group totals (calculated in SP, repeated per row in that group) ===== */  
-        GroupTotalRmNights =  
-            SUM(  
-                CASE  
-                    WHEN R.RSNNO IS NULL THEN 0  
-                    WHEN R.RSDTXLD IS NULL  
-                        THEN DATEDIFF(DAY, CONVERT(DATE, R.RSDTARR), CONVERT(DATE, R.RSDTDEP))  
-                    ELSE 0  
-                END  
-            ) OVER (  
-                PARTITION BY  
-                    E.EMNNO,  
-                    CASE  
-                        WHEN H.HTCACRO = 'Request'  
-                            THEN 'zzz' + H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                        ELSE  
-                            H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                    END,  
-                    (CASE WHEN RC.RCCACRO IS NULL THEN 'N/A' ELSE RC.RCCACRO END)  
-                    + CONVERT(VARCHAR(20), ISNULL(RC.RCNNO, 0))  
-            ),  
-  
-        GroupDepositRmNights =  
-            SUM(  
-                CASE  
-                    WHEN R.RSNNO IS NULL THEN 0  
-                    WHEN H.HTCACCTYPE = 'DA' AND R.RSDTXLD IS NULL  
-                        THEN DATEDIFF(DAY, CONVERT(DATE, R.RSDTARR), CONVERT(DATE, R.RSDTDEP))  
-                    ELSE 0  
-                END  
-            ) OVER (  
-                PARTITION BY  
-                    E.EMNNO,  
-                    CASE  
-                        WHEN H.HTCACRO = 'Request'  
-                            THEN 'zzz' + H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                        ELSE  
-                            H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-                    END,  
-                    (CASE WHEN RC.RCCACRO IS NULL THEN 'N/A' ELSE RC.RCCACRO END)  
-                    + CONVERT(VARCHAR(20), ISNULL(RC.RCNNO, 0))  
-            )  
-  
-    FROM ICM.dbo.EVENTS E  
-    LEFT JOIN ICM.dbo.HOTEL H  
-        ON E.EMNNO = H.EMNNO  
-    LEFT JOIN ICM.dbo.HOTELROOMCATEGORIES HRC  
-        ON H.HTNNO = HRC.HTNNO  
-    LEFT JOIN ICM.dbo.HOTELINVENTORY HI  
-        ON HRC.HRNNO = HI.HRNNO  
-    LEFT JOIN ICM.dbo.RESERVATIONS R  
-        ON HRC.HTNNO = R.HTNNO  
-       AND HRC.RCNNO = R.RCNNO  
-    LEFT JOIN ICM.dbo.ROOMCATEGORIES RC  
-        ON HRC.RCNNO = RC.RCNNO  
-    LEFT JOIN ICM.dbo.HOTELROOMTYPECOSTS HRTC  
-        ON HI.HINNO = HRTC.HINNO  
-    LEFT JOIN ICM.dbo.ROOMTYPES RT  
-        ON HRTC.RTNNO = RT.RTNNO  
-    WHERE  
-        E.EMNNO = @EMNNO  
-    ORDER BY  
-        E.EMNNO,  
-        CASE  
-            WHEN H.HTCACRO = 'Request'  
-                THEN 'zzz' + H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-            ELSE  
-                H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)  
-        END,  
-        (CASE WHEN RC.RCCACRO IS NULL THEN 'N/A' ELSE RC.RCCACRO END)  
-        + CONVERT(VARCHAR(20), ISNULL(RC.RCNNO, 0)),  
-        HI.HIDATE,  
-        RT.RTCACRO;  
-  
-END  
+CREATE OR ALTER PROCEDURE dbo.sp_ICM_RPT_HotelRoomRatesAndDeposits_RDLC
+(
+      @EMNNO INT
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    /* =========================
+       1) EVENT + HOTEL BASE  (THIS drives the report)
+       ========================= */
+    ;WITH EH AS
+    (
+        SELECT
+              E.EMNNO
+            , E.EMCNM
+            , E.EMDTBEG
+            , E.EMDTEND
+            , H.HTNNO
+            , H.HTCDSC
+            , H.HTCACRO
+            , H.HTCACCTYPE
+            , HotelSort =
+                CASE
+                    WHEN H.HTCACRO = 'Request'
+                        THEN 'zzz' + H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)
+                    ELSE
+                        H.HTCDSC + CONVERT(VARCHAR(20), H.HTNNO)
+                END
+        FROM ICM.dbo.EVENTS E
+        JOIN ICM.dbo.HOTEL  H
+            ON H.EMNNO = E.EMNNO
+        WHERE E.EMNNO = @EMNNO
+    ),
+
+    /* =========================
+       2) ALL HOTEL + ROOM CATEGORY COMBOS (only if exist)
+          NOTE: We do NOT force rows here.
+          We will LEFT JOIN this to EH so hotels with none still show 1 row.
+       ========================= */
+    AllCats AS
+    (
+        SELECT DISTINCT
+              HRC.HTNNO
+            , HRC.RCNNO
+        FROM ICM.dbo.HOTELROOMCATEGORIES HRC
+        JOIN EH
+            ON EH.HTNNO = HRC.HTNNO
+
+        UNION
+
+        SELECT DISTINCT
+              R.HTNNO
+            , R.RCNNO
+        FROM ICM.dbo.RESERVATIONS R
+        JOIN EH
+            ON EH.HTNNO = R.HTNNO
+        WHERE R.RCNNO IS NOT NULL
+    ),
+
+    /* =========================
+       3) HOTEL + CATEGORY OUTPUT ROWS
+          IMPORTANT: LEFT JOIN to AllCats
+          => if no category exists, we still get 1 row per hotel with RCNNO = NULL
+       ========================= */
+    HC AS
+    (
+        SELECT
+              EH.EMNNO, EH.EMCNM, EH.EMDTBEG, EH.EMDTEND
+            , EH.HTNNO, EH.HTCDSC, EH.HTCACRO, EH.HTCACCTYPE
+            , EH.HotelSort
+            , AC.RCNNO
+            , HRC.HRNNO
+            , RoomType     = ISNULL(RC.RCCACRO, 'N/A')
+            , RoomTypeSort = ISNULL(RC.RCCACRO, 'N/A') + CONVERT(VARCHAR(20), ISNULL(AC.RCNNO,0))
+        FROM EH
+        LEFT JOIN AllCats AC
+            ON AC.HTNNO = EH.HTNNO
+        LEFT JOIN ICM.dbo.HOTELROOMCATEGORIES HRC
+            ON HRC.HTNNO = EH.HTNNO
+           AND HRC.RCNNO = AC.RCNNO
+        LEFT JOIN ICM.dbo.ROOMCATEGORIES RC
+            ON RC.RCNNO = AC.RCNNO
+    ),
+
+    /* =========================
+       4) RESERVATION NIGHTS (AGGREGATED) - no duplication
+       ========================= */
+    ResAgg AS
+    (
+        SELECT
+              R.HTNNO
+            , R.RCNNO
+            , TotalRmNights =
+                SUM(
+                    CASE
+                        WHEN R.RSNNO IS NULL THEN 0
+                        WHEN R.RSDTXLD IS NOT NULL THEN 0
+                        WHEN R.RSDTARR IS NULL OR R.RSDTDEP IS NULL THEN 0
+                        WHEN CONVERT(DATE,R.RSDTDEP) <= CONVERT(DATE,R.RSDTARR) THEN 0
+                        ELSE DATEDIFF(DAY, CONVERT(DATE,R.RSDTARR), CONVERT(DATE,R.RSDTDEP))
+                    END
+                )
+            , DepAmtRmNights =
+                SUM(
+                    CASE
+                        WHEN R.RSNNO IS NULL THEN 0
+                        WHEN R.RSDTXLD IS NOT NULL THEN 0
+                        WHEN H.HTCACCTYPE <> 'DA' THEN 0
+                        WHEN R.RSDTARR IS NULL OR R.RSDTDEP IS NULL THEN 0
+                        WHEN CONVERT(DATE,R.RSDTDEP) <= CONVERT(DATE,R.RSDTARR) THEN 0
+                        ELSE DATEDIFF(DAY, CONVERT(DATE,R.RSDTARR), CONVERT(DATE,R.RSDTDEP))
+                    END
+                )
+        FROM ICM.dbo.RESERVATIONS R
+        JOIN ICM.dbo.HOTEL H
+            ON H.HTNNO = R.HTNNO
+        WHERE H.EMNNO = @EMNNO
+        GROUP BY
+              R.HTNNO
+            , R.RCNNO
+    ),
+
+    /* =========================
+       5) FIRST INVENTORY NIGHT PER HRNNO
+       ========================= */
+    FirstInv AS
+    (
+        SELECT
+              HI.HRNNO
+            , HI.HINNO
+            , HI.HIDATE
+            , rn = ROW_NUMBER() OVER (PARTITION BY HI.HRNNO ORDER BY HI.HIDATE, HI.HINNO)
+        FROM ICM.dbo.HOTELINVENTORY HI
+    ),
+    FirstInvOnly AS
+    (
+        SELECT HRNNO, HINNO, HIDATE
+        FROM FirstInv
+        WHERE rn = 1
+    ),
+
+    /* =========================
+       6) PICK ONE COST ROW FOR THAT FIRST NIGHT
+       ========================= */
+    CostPick AS
+    (
+        SELECT
+              HRC.HRNNO
+            , HRC.RCNNO
+            , HRTC.HCNCOST
+            , HRTC.HCNDEPOSIT
+            , HRTC.HCNSVCCHG
+            , rn = ROW_NUMBER() OVER
+                  (
+                    PARTITION BY HRC.HRNNO, HRC.RCNNO
+                    ORDER BY
+                        CASE WHEN RT.RTCACRO = RC.RCCACRO THEN 0 ELSE 1 END,
+                        RT.RTNNO
+                  )
+        FROM ICM.dbo.HOTELROOMCATEGORIES HRC
+        JOIN FirstInvOnly FI
+            ON FI.HRNNO = HRC.HRNNO
+        JOIN ICM.dbo.HOTELROOMTYPECOSTS HRTC
+            ON HRTC.HINNO = FI.HINNO
+        JOIN ICM.dbo.ROOMTYPES RT
+            ON RT.RTNNO = HRTC.RTNNO
+           AND RT.RCNNO = HRC.RCNNO
+        LEFT JOIN ICM.dbo.ROOMCATEGORIES RC
+            ON RC.RCNNO = HRC.RCNNO
+    ),
+    FirstNightCost AS
+    (
+        SELECT
+              HRNNO
+            , RCNNO
+            , RoomRate   = CAST(HCNCOST    AS DECIMAL(18,2))
+            , DepAmt     = CAST(HCNDEPOSIT AS DECIMAL(18,2))
+            , SvcChgAmt  = CAST(HCNSVCCHG  AS DECIMAL(18,2))
+        FROM CostPick
+        WHERE rn = 1
+    )
+
+    /* =========================
+       FINAL OUTPUT
+       (1 row per Hotel + Category; hotels with no data still appear once with N/A)
+       ========================= */
+    SELECT
+          EMNNO = H.EMNNO
+        , HTNNO = H.HTNNO
+        , RCNNO = ISNULL(H.RCNNO, 0)    -- keep stable PK for RDLC even if NULL
+
+        , H.EMCNM
+        , H.EMDTBEG
+        , H.EMDTEND
+
+        , H.HTCDSC
+        , H.HotelSort
+        , H.RoomType
+        , H.RoomTypeSort
+
+        , RoomRate  = ISNULL(C.RoomRate,  0.00)
+        , DepAmt    = ISNULL(C.DepAmt,    0.00)
+        , SvcChgAmt = ISNULL(C.SvcChgAmt, 0.00)
+
+        , DepAmtRmNights = ISNULL(RA.DepAmtRmNights, 0)
+        , TotalRmNights  = ISNULL(RA.TotalRmNights,  0)
+
+    FROM HC H
+    LEFT JOIN FirstNightCost C
+        ON C.HRNNO = H.HRNNO
+       AND C.RCNNO = H.RCNNO
+    LEFT JOIN ResAgg RA
+        ON RA.HTNNO = H.HTNNO
+       AND RA.RCNNO = H.RCNNO
+
+    ORDER BY
+          H.EMNNO
+        , H.HotelSort
+        , H.RoomTypeSort;
+END
+GO
