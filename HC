@@ -1,123 +1,50 @@
-<%@ Page Language="C#" AutoEventWireup="true" CodeBehind="Report.aspx.cs" Inherits="ReportRDLC.Report16.ReportRdlc" %>
-<%@ Register Assembly="Microsoft.ReportViewer.WebForms" Namespace="Microsoft.Reporting.WebForms" TagPrefix="rsweb" %>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head runat="server">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RDLC Report</title>
-<%--  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css" />
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
-  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>--%>
-	<script src="Content/js/gapis.js"></script>
-	<link href="Content/maxcdn1.css" rel="stylesheet" />
-	<script src="Content/js/maxcd1.js"></script>
-  <style>
-			.overlay{position:fixed;left:0;top:0;width:100%;height:100%;background:#808080;opacity:.8;z-index:9999;display:none}
-			
-			.container{
-				width:1300px !important;
-			}
-  </style>
-  <script>function Loader(s) { if (s) $("#busy").show(); else $("#busy").hide(); }</script>
-</head>
-<body>
-<form id="form1" runat="server" class="container classborder" style="margin-top:12px">
-<div id="busy" class="overlay">
-  <asp:Image ID="imgBusy" runat="server"
-             ImageUrl="~/Report16/Images/ProgressImage.gif"
-             AlternateText="Processing..."
-             Style="display:block;margin:20% auto 0;" />
-</div>
-
-  <!-- FILTERS (shown only when ?Filter=... is present) -->
-  <asp:Panel ID="pnlFilters" runat="server" Visible="false" CssClass="panel panel-default">
-    <div class="panel-heading" style="font-size:25px;color:#336699;"><b><u>Optional Report Choices</u></b></div>
-    <div class="panel-body form-horizontal">
-      <asp:Literal ID="ltrParams" runat="server" />
-      <div class="form-group">
-        <div class="col-sm-12 btncontinue">
-       <asp:Button ID="btnContinue" runat="server" Text="Continue" CssClass="btn btn-primary"
-    OnClick="btnContinue_Click"
-    OnClientClick="return startDownload();" />
+SELECT "ACTMST"."ACNEXTAMT", "REGMST"."RGCPLNM", "REGMST"."RGCPFNM", "REGMST"."RGNNO", "REGMST"."RGCPAD1", "REGMST"."RGCPAD2", "REGMST"."RGCPCITY", "REGMST"."RGCPST", "REGMST"."RGCPZIP", "REGMST"."RGCPCTRY", "REGMST"."RGCPREGN", "EVENTS"."EMNNO", "RESERVATIONS"."RSNNO", "RESERVATIONS"."RSDTARR", "RESNIGHTS"."RNMPERNIGHTCHARGE", "RESERVATIONS"."RSDTDEP", "ROOMMATES"."RMNNO", "ACTMST"."ACNDSBAMT", "RESERVATIONS"."RSCCCTYPE", "HOTEL"."HTNTAXINC", "HOTEL"."HTCACRO", "EVENTS"."EMCNM", "HOTEL"."HTCDSC", "ROOMTYPES"."RTCACRO", "ROOMMATES"."RSNNO", "ROOMMATES"."RMDTARR", "ROOMMATES"."RMDTDEP", "ROOMMATES"."RMCLNM", "ROOMMATES"."RMCFNM", "HOTEL"."HTNNO", "RESERVATIONS"."RSCCCNO", "RESERVATIONS"."RSCCCEXP", "RESERVATIONS"."RSDTXLD", "CATEGORY"."CMNNO", "REGUSER"."RUNNO"
+ FROM   (((((((("ICM"."dbo"."EVENTS" "EVENTS" INNER JOIN "ICM"."dbo"."REGMST" "REGMST" ON "EVENTS"."EMNNO"="REGMST"."EMNNO") INNER JOIN "ICM"."dbo"."ACTMST" "ACTMST" ON "REGMST"."RGNNO"="ACTMST"."RGNNO") LEFT OUTER JOIN "ICM"."dbo"."REGUSER" "REGUSER" ON "REGMST"."RGNNO"="REGUSER"."RGNNO") INNER JOIN "ICM"."dbo"."CATEGORY" "CATEGORY" ON "REGMST"."CMNNO"="CATEGORY"."CMNNO") INNER JOIN "ICM"."dbo"."RESERVATIONS" "RESERVATIONS" ON "ACTMST"."RSNNO"="RESERVATIONS"."RSNNO") INNER JOIN "ICM"."dbo"."HOTEL" "HOTEL" ON "RESERVATIONS"."HTNNO"="HOTEL"."HTNNO") LEFT OUTER JOIN "ICM"."dbo"."RESNIGHTS" "RESNIGHTS" ON "RESERVATIONS"."RSNNO"="RESNIGHTS"."RSNNO") LEFT OUTER JOIN "ICM"."dbo"."ROOMMATES" "ROOMMATES" ON "RESERVATIONS"."RSNNO"="ROOMMATES"."RSNNO") LEFT OUTER JOIN "ICM"."dbo"."ROOMTYPES" "ROOMTYPES" ON "RESERVATIONS"."RTNNO"="ROOMTYPES"."RTNNO"
+ WHERE  "EVENTS"."EMNNO"=0
+ ORDER BY "EVENTS"."EMNNO"
 
 
-        </div>
-      </div>
-    </div>
-  </asp:Panel>
-
-  <!-- Optional in-page preview when V is not P/E -->
-  <asp:Panel ID="pnlViewer" runat="server" Visible="false">
-    <rsweb:ReportViewer ID="rv" runat="server"
-      AsyncRendering="false" SizeToReportContent="true"
-      Width="100%" Height="900px" />
-  </asp:Panel>
-
-   <iframe id="downloadFrame" name="downloadFrame" style="display:none"></iframe>
-<input type="hidden" id="dlToken" name="dlToken" />
-
-</form>
-
-     <script>
-		var dlPoll = null;
-
-		function clearLoader() {
-			Loader(false);
-			if (dlPoll) { clearInterval(dlPoll); dlPoll = null; }
-		}
-
-		function startDownload() {
-			// Only do the special flow when exporting a file
-			var v = (new URLSearchParams(location.search)).get('V') || '';
-			var isFile = (v.toUpperCase() === 'E' || v.toUpperCase() === 'P');
+ gpt i want to use this above sql to get the records in below sp and gpt remember select will be same but order you check below in sp
 
 
 
-			if (!isFile) {
-				Loader(true);                // normal postback (in-page preview)
-				return true;
-			}
 
-			// Unique token for this download
-			var token = Date.now().toString();
-			document.getElementById('dlToken').value = token;
-
-			// Remove any old cookie
-			document.cookie = 'fileDownloadToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-
-			// Post to a hidden iframe so the page doesn't navigate
-			var form = document.getElementById('<%= form1.ClientID %>');
-			form.setAttribute('target', 'downloadFrame');
-
-			Loader(true);
-
-			// Poll for the server-set cookie that signals download complete
-			dlPoll = setInterval(function () {
-				if (document.cookie.indexOf('fileDownloadToken=' + token) !== -1) {
-					clearLoader();
-					form.removeAttribute('target');
-					// Clean cookie
-					document.cookie = 'fileDownloadToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-				}
-			}, 400);
-
-			// Safety timeout (e.g., network error)
-			setTimeout(function () {
-				clearLoader();
-				form.removeAttribute('target');
-			}, 120000); // 2 minutes
-
-			return true; // allow postback
-		}
-
-		// Extra safety: if the page navigates away for any reason
-		window.addEventListener('pagehide', clearLoader);
-	</script>
-
-
-</body>
-    
-
-</html>
-
+CREATE PROCEDURE sp_ICM_RPT_Ht142_RDLC             
+@EMNNO int                
+As                
+/*              
+Created By : Pravendra              
+Created on :04-02-2026              
+Description :Get report data for Hotel - Cancellations (HT142 Report )              
+*/             
+BEGIN              
+Set NoCount On                 
+SET ANSI_WARNINGS OFF                 
+         
+         
+SELECT Distinct RESERVATIONS.RSNNO, RESERVATIONS.RGNNO, RESERVATIONS.HTNNO, RESERVATIONS.RTNNO, RESERVATIONS.RCNNO, RESERVATIONS.RCNNO,  RESERVATIONS.HBNNO  , RESERVATIONS.RSDTARR , RESERVATIONS.RSDTDEP , RESERVATIONS.RSDTXLD , RESERVATIONS.RSCCCTYPE , RESERVATIONS.RSCCCNO, RESERVATIONS.RSCCCEXP,         
+REGMST.EMNNO, REGMST.RGCNO, REGMST.CMNNO,REGMST.EMNNO, REGMST.CMNNO , REGMST.RGCPLNM , REGMST.RGCPFNM , REGMST.RGCBAD1 , REGMST.RGCBAD2 ,REGMST.RGCBCITY, REGMST.RGCPST, REGMST.RGCPZIP,REGMST.RGCPCTRY,  REGMST.RGCPREGN,         
+Hotel.HTCDSC, Hotel.HTCACRO ,Hotel.HTNTAXINC,        
+Events.EMCNM, Events.CUNNO, Events.MINNO, Events.CMNNO,        
+ROOMTYPES.CUNNO, ROOMTYPES.RTCACRO,        
+--ROOMMATES.RMNNO,      
+ROOMMATES.RSNNO ,ROOMMATES.RMCLNM , ROOMMATES.RMCFNM, ROOMMATES.RMDTARR, ROOMMATES.RMDTDEP,        
+ACTMST.ACNNO,ACTMST.EMNNO,ACTMST.CMNNO,ACTMST.RGNNO,ACTMST.ABNNO,ACTMST.SBNNO,ACTMST.RSNNO, ACTMST.AVNNO,ACTMST.SPNNO,ACTMST.ACNTAXAMT, ACTMST.ACNDSBAMT      
+FROM RESERVATIONS         
+INNER JOIN REGMST        
+ON RESERVATIONS.RGNNO = REGMST.RGNNO        
+INNER JOIN Hotel         
+ON RESERVATIONS.HTNNO = Hotel.HTNNO        
+INNER JOIN Events        
+ON REGMST.EMNNO = Events.EMNNO        
+INNER JOIN ROOMTYPES        
+ON RESERVATIONS.RTNNO = ROOMTYPES.RTNNO        
+INNER JOIN ROOMMATES        
+ON ROOMMATES.RSNNO =  RESERVATIONS.RSNNO        
+INNER JOIN ACTMST        
+--ON RESERVATIONS.RSNNO  = ACTMST.RSNNO AND REGMST.RGNNO = ACTMST.RGNNO AND  REGMST.EMNNO = ACTMST.EMNNO AND REGMST.CMNNO = ACTMST.CMNNO        
+ON RESERVATIONS.RSNNO  = ACTMST.RSNNO AND REGMST.RGNNO = ACTMST.RGNNO        
+        
+WHERE REGMST.EMNNO = @EMNNO AND  RESERVATIONS.RSDTXLD IS NOT NULL AND RESERVATIONS.RSDTXLD <> '' ;       
+              
+END 
