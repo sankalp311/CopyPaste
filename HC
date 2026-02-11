@@ -1,47 +1,32 @@
-SELECT
-    R.CUNNO,
-    R.RMCSYSTEM,
-    CASE R.RMNNO
-        WHEN 816 THEN 'HT152-Core' else
-		R.RMCACRO + ' - RDLC' END AS RMCACRO,
-    R.RMCNAME,
-    R.RMCCMT,
-    R.RMCSTATUS,
-    R.RMCGROUP,
-    R.RMCGROUP,   
-    CASE R.RMNNO
-        WHEN 842 THEN 'TT_AC204exp.rdlc'
-        WHEN 771 THEN 'TT_HotelResDetail.rdlc'
-        WHEN 863 THEN 'TT_EventAutoRelease.rdlc'
-        WHEN 775 THEN 'TT-EvtOverview.rdlc'
-        WHEN 113 THEN 'HT132rdlc'     
-        WHEN 845 THEN 'TT_AC205.rdlc'
-		WHEN 816 THEN 'N/A'
-    END AS RMCREPORT,
-    R.RMCTYPE,
-    R.RMCRUN,
-    R.RMCINDWHERE,
-    R.RMCTBL1,
-    R.RMCTBL2,
-    R.RMCTBL3,
-    R.RMCTBL4,
-    R.RMCTBL5,
-    R.RMCPREPROCESS,
-    R.RMCWHERE2,
-    R.RMCFORM,
-    R.RMCWHERE3,
-    R.RMCPOSTPROCESS,
-    R.RMCINDWHERE2,
-    R.RMCINDWHERE3,
-    R.RMCFORMULANAME,
-    R.RMCFORMULA,
-    R.RMNPRINTTOFILE,
-    R.RMNEXPORT,
-    R.RMNSOURCETYPE,
-    R.RMNVERSION,
-    R.RMNAFFILIATE,
-    R.RMCEXPORTTYPE,
-    R.RMNNO_GUID,
-    R.RMNNO_IMP
-FROM REPORTS R
-WHERE R.RMNNO IN (842, 771, 863, 775, 113, 845,816)
+Prod RMNNO
+884 - TT-AC204exp - RDLC
+881 - TT-HotelResDetail - RDLC
+886 - TT-EventAutoRelease - RDLC
+882 - TT-EvtOverview - RDLC
+880 - HT132 - RDLC
+885 - TT-AC205exp - RDLC
+
+
+Dev RMNNO
+884 - TT-AC204exp - RDLC
+890 - TT-HotelResDetail - RDLC
+894 - TT-EventAutoRelease - RDLC
+888 - TT-EvtOverview - RDLC
+876 - HT132 - RDLC
+891 - TT-AC205exp - RDLC
+
+
+Dev To prod map
+
+
+884 - 884 
+890 - 881
+894 - 886
+888 - 882
+876 - 880
+891 - 885
+
+now you have to replcae dev rmnno in the image from this above text prod rmnno thats it.
+
+and make a insert script
+
