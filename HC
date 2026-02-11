@@ -1,7 +1,269 @@
-select * from rsREPORTS where USNNO = 161 AND RMNNO IN (880,881,882,884,885,886,887,888,889,890,891,892)
-delte from rsREPORTS where USNNO = 161 AND RMNNO IN (880,881,882,884,885,886,887,888,889,890,891,892)
 
-select * from rsREPORTS where USNNO = 85 AND RMNNO IN (880,881,882,884,885,886,887,888,889,890,891,892)
-delte from rsREPORTS where USNNO = 161 AND RMNNO IN (880,881,882,884,885,886,887,888,889,890,891,892)
-
-
+    -------------------------------------------------------------------------        
+    -- 1) Base rows (same join path as Crystal)        
+    -------------------------------------------------------------------------        
+    ;WITH Base AS        
+    (        
+        SELECT DISTINCT        
+            rm.RGCPLNM,        
+            rm.RGCPFNM,        
+            rm.RGNNO,        
+            e.EMNNO,        
+            r.RSNNO,        
+            r.RSDTARR,        
+            r.RSDTDEP,        
+            e.EMCNM,        
+            r.RSCPERSONCOMMENTS,        
+            r.RSDTXLD,        
+            r.RSCREQUESTSTRING,        
+            r.RSCHOTELCOMMENTS,        
+            r.RSNMASTERACCOUNT,        
+            rc.RCCACRO,        
+            h.HTCDSC,        
+            rn.RNMPERNIGHTCHARGE,        
+            hrtc.HCNCOST,        
+            hi.HIDATE,        
+            rt.RTCACRO,        
+            r.RSCCCTYPE,        
+            r.RSCCCEXP,        
+            h.HTCACRO,        
+            h.HTNNO,        
+            e.EMDTBEG,        
+            e.EMDTEND,        
+            hb.HBCORG,        
+            --dbo.udf_blowfishdecrypt(r.RSCCCNO, 'ILME5fgPicoqFOik+8amMQ==') RSCCCNO,        
+            RSCCCNO,  
+            -- Group Keys        
+            HotelSort =        
+                ISNULL(h.HTCACRO, '') + CONVERT(varchar(20), h.HTNNO),        
+        
+            NameRegno =        
+                ISNULL(rm.RGCPLNM, '')        
+              + ISNULL(rm.RGCPFNM, '')        
+              + CONVERT(varchar(20), rm.RGNNO)        
+              + CONVERT(varchar(20), r.RSNNO),        
+        
+            -- Formula pieces (row-level)        
+            FullName =        
+                CASE        
+                    WHEN rm.RGCPLNM IS NULL OR LTRIM(RTRIM(rm.RGCPLNM)) = ''        
+                        THEN 'No Last name' + ', ' + ISNULL(rm.RGCPFNM,'')        
+                    ELSE LTRIM(RTRIM(rm.RGCPLNM)) + ', ' + ISNULL(rm.RGCPFNM,'')        
+                END,        
+        
+            HotelPersonReq =        
+                CASE        
+                    WHEN r.RSCPERSONCOMMENTS IS NULL THEN ''        
+                    ELSE r.RSCPERSONCOMMENTS        
+                END,        
+        
+            HotelRequests =        
+                CASE        
+                    WHEN r.RSCPERSONCOMMENTS IS NULL        
+                        THEN ISNULL(r.RSCREQUESTSTRING, '')        
+                    WHEN r.RSCPERSONCOMMENTS IS NOT NULL        
+                         AND r.RSCREQUESTSTRING IS NOT NULL        
+                        THEN ', ' + r.RSCREQUESTSTRING        
+                    ELSE ''        
+                END,        
+        
+            HotelMstrAcctReq =        
+                CASE        
+                    WHEN r.RSNMASTERACCOUNT IS NULL OR r.RSNMASTERACCOUNT = 0 THEN ''        
+                    WHEN r.RSNMASTERACCOUNT = 1        
+      AND (r.RSCPERSONCOMMENTS IS NOT NULL OR r.RSCREQUESTSTRING IS NOT NULL)        
+                        THEN ', Master Account-Room Only'        
+                    WHEN r.RSNMASTERACCOUNT = 2        
+      AND (r.RSCPERSONCOMMENTS IS NOT NULL OR r.RSCREQUESTSTRING IS NOT NULL)        
+                        THEN ', Master Account-Rm, Tax & Incidentals'        
+                    WHEN r.RSNMASTERACCOUNT = 1        
+                      AND r.RSCPERSONCOMMENTS IS NULL AND r.RSCREQUESTSTRING IS NULL        
+                        THEN 'Master Account-Room Only'        
+                    WHEN r.RSNMASTERACCOUNT = 2        
+                         AND r.RSCPERSONCOMMENTS IS NULL AND r.RSCREQUESTSTRING IS NULL        
+                        THEN 'Master Account-Rm, Tax & Incidentals'        
+                    ELSE ''        
+                END,        
+        
+            HotelOnlyRequests =        
+                CASE        
+                    WHEN (r.RSCPERSONCOMMENTS IS NOT NULL        
+                          OR r.RSCREQUESTSTRING IS NOT NULL        
+                          OR ISNULL(r.RSNMASTERACCOUNT,0) <> 0)        
+                        THEN        
+                            CASE        
+                                WHEN r.RSCHOTELCOMMENTS IS NULL THEN ''        
+                                ELSE ', ' + r.RSCHOTELCOMMENTS        
+                            END        
+                    ELSE ISNULL(r.RSCHOTELCOMMENTS,'')        
+                END        
+        
+        FROM dbo.RESNIGHTS rn        
+            INNER JOIN dbo.RESERVATIONS r        
+                ON rn.RSNNO = r.RSNNO        
+            INNER JOIN dbo.REGMST rm        
+                ON rm.RGNNO = r.RGNNO        
+            INNER JOIN dbo.EVENTS e        
+                ON e.EMNNO = rm.EMNNO        
+            INNER JOIN dbo.HOTELINVENTORY hi        
+                ON rn.HINNO = hi.HINNO        
+            INNER JOIN dbo.HOTELROOMTYPECOSTS hrtc        
+                ON  rn.RTNNO = hrtc.RTNNO        
+                AND rn.HINNO = hrtc.HINNO        
+            INNER JOIN dbo.HOTEL h        
+                ON r.HTNNO = h.HTNNO        
+            INNER JOIN dbo.ROOMTYPES rt        
+                ON r.RTNNO = rt.RTNNO        
+            INNER JOIN dbo.ROOMCATEGORIES rc        
+                ON r.RCNNO = rc.RCNNO        
+            LEFT JOIN dbo.HOTELROOMBLOCKS hb        
+                ON r.HBNNO = hb.HBNNO        
+        WHERE e.EMNNO = CAST(20156 AS INT)        
+    ),        
+    -------------------------------------------------------------------------        
+    -- 2) Collapse to one row per NameRegno (Crystal detail line friendly)        
+    -------------------------------------------------------------------------        
+    Agg AS        
+    (        
+        SELECT        
+            EMNNO,        
+            HotelSort,        
+            NameRegno,        
+        
+            -- IDs        
+            RGNNO = MAX(RGNNO),        
+            RSNNO = MAX(RSNNO),        
+            HTNNO = MAX(HTNNO),        
+        
+            -- Names / labels        
+            EMCNM   = MAX(EMCNM),        
+            HTCDSC  = MAX(HTCDSC),        
+            HTCACRO = MAX(HTCACRO),        
+            HBCORG  = MAX(HBCORG),        
+            RCCACRO = MAX(RCCACRO),        
+            RTCACRO = MAX(RTCACRO),        
+            FullName = MAX(FullName),        
+        
+            -- Dates        
+            RSDTARR = MIN(RSDTARR),        
+            RSDTDEP = MAX(RSDTDEP),        
+            EMDTBEG = MAX(EMDTBEG),        
+            EMDTEND = MAX(EMDTEND),        
+        
+            -- Cancel info        
+            RSDTXLD = MAX(RSDTXLD),        
+        
+            -- Charges        
+            TotalNightCharge = SUM(ISNULL(RNMPERNIGHTCHARGE, 0)),        
+            DistinctNightCnt = COUNT(DISTINCT HIDATE),        
+        
+            SumHCNCOST = SUM(ISNULL(HCNCOST, 0)),        
+        
+            -- Request pieces (already formatted with commas rules)    
+            HotelPersonReq   = MAX(HotelPersonReq),        
+            HotelRequests    = MAX(HotelRequests),        
+            HotelMstrAcctReq = MAX(HotelMstrAcctReq),        
+            HotelOnlyRequests= MAX(HotelOnlyRequests),        
+        
+            -- CC pieces        
+            RSCCCTYPE = MAX(RSCCCTYPE),        
+            RSCCCNO   = MAX(master.dbo.udf_blowfishdecrypt(RSCCCNO, 'ILME5fgPicoqFOik+8amMQ==')),        
+            RSCCCEXP  = MAX(RSCCCEXP)        
+        
+        FROM Base        
+        GROUP BY        
+            EMNNO,        
+            HotelSort,        
+            NameRegno        
+    )        
+    -------------------------------------------------------------------------        
+    -- 3) Final projection with Crystal-equivalent formulas        
+    -------------------------------------------------------------------------        
+    SELECT        
+        -- Crystal group keys        
+        EMNNO,        
+        HotelSort,        
+        NameRegno,        
+        
+        -- Useful IDs        
+        RGNNO,        
+        RSNNO,        
+        HTNNO,        
+        
+        -- Display fields        
+        EMCNM,        
+        HTCDSC,        
+        HTCACRO,        
+        FullName,        
+        TeamName = HBCORG,        
+        RoomCategory = RCCACRO,        
+        RoomType     = RTCACRO,        
+        
+        -- Arrive / Depart        
+        RSDTARR,        
+        RSDTDEP,        
+        
+        -- Crystal NbrNites        
+        NbrNites =        
+            CASE        
+                WHEN RSDTXLD IS NOT NULL THEN 0        
+                ELSE DATEDIFF(DAY, RSDTARR, RSDTDEP)        
+            END,        
+        
+        -- Crystal NotCanceled        
+        NotCanceled =        
+            CASE        
+                WHEN RSDTXLD IS NULL THEN 1        
+                ELSE 0        
+            END,        
+        
+        -- Crystal AvgRate        
+        AvgRate =        
+            CASE        
+                WHEN ISNULL(DistinctNightCnt, 0) = 0 THEN 0        
+                ELSE CAST(TotalNightCharge AS decimal(18,2))        
+                     / NULLIF(DistinctNightCnt, 0)        
+            END,        
+        
+        -- Crystal "Total" equivalent for the line        
+        TotalNightCharge,        
+        
+        -- CC Type / CC# / CC Exp (Crystal Res_CCInfo style)        
+        Res_CCInfo =        
+            ISNULL(RSCCCTYPE, '')        
+            + ' / '        
+            + RIGHT(ISNULL(RSCCCNO,''), 4)        
+            + ' / '        
+            + ISNULL(master.dbo.udf_blowfishdecrypt(RSCCCEXP, 'ILME5fgPicoqFOik+8amMQ=='), ''),        
+        
+        -- Special Requests (Crystal concatenation)        
+        HotelPersonReq,        
+        HotelRequests,        
+        HotelMstrAcctReq,        
+        HotelOnlyRequests,        
+        
+        SpecialRequests =        
+            ISNULL(HotelPersonReq,'')        
+          + ISNULL(HotelRequests,'')        
+          + ISNULL(HotelMstrAcctReq,'')        
+          + ISNULL(HotelOnlyRequests,''),        
+        
+        -- If you want this visible in RDLC        
+        SumHCNCOST,        
+        
+        -- Event dates if needed in header reuse        
+        EMDTBEG,        
+        EMDTEND        
+        
+    FROM Agg     
+ WHERE    
+    CASE    
+        WHEN RSDTXLD IS NOT NULL THEN 0    
+        ELSE DATEDIFF(DAY, RSDTARR, RSDTDEP)    
+    END > 0    
+    ORDER BY        
+        EMNNO,        
+        HotelSort,        
+        NameRegno,        
+        RSDTARR,        
+        RSDTDEP;   
