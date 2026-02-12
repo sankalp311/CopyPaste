@@ -1,195 +1,301 @@
-Now gpt below id crystal report sql and subreport sql from tool
-
-now i am making the rdlc report like exaxt same so i need to write the sp and bind data accordingly in same order with all same values.
-
-so gpt i want you to the sp and dont use slow processing sqls like using cte , in clause like that ok.
-
-i think you can make 3 select and htnno common maybe and write it. analyze it because its very imp reports.
-So now write it.
-if you want any information let me know like you are confused about the values in crystal report image so i can tell you ok.
-
-
- SELECT "HOTELROOMBLOCKS"."HBNNO", "HOTELROOMBLOCKS"."HBCACRO", "ROOMCATEGORIES"."RCCDESC", "HOTELROOMBLOCKINVENTORY"."HINNO", "RESERVATIONS"."RSDTARR", "RESERVATIONS"."RSDTDEP", "HOTELROOMBLOCKS"."HBCNO", "RESERVATIONS"."RSDTXLD", "RESERVATIONS"."RSNNO", "HOTELROOMBLOCKS"."HBCORG", "HOTELROOMBLOCKS"."HBCFNM", "HOTELROOMBLOCKS"."HBCLNM", "HOTELROOMBLOCKS"."HBCTEL", "HOTELROOMBLOCKS"."HBDTREQUESTED", "HOTELROOMBLOCKS"."HBDTSTART", "ROOMCATEGORIES"."RCCACRO", "HOTELROOMBLOCKINVENTORY"."RBNAMOUNTREQUESTED", "HOTELROOMBLOCKINVENTORY"."RBNAMOUNTRESERVED", "HOTELROOMBLOCKINVENTORY"."RBNREMAININGAVAILABLE", "HOTEL"."HTNNO", "HOTELROOMBLOCKINVENTORY"."RBNADJUSTMENTS", "EVENTS"."EMDTBEG", "EVENTS"."EMDTEND", "EVENTS"."EMCNM", "HOTEL"."HTCDSC", "HOTEL"."HTCSLETEL", "HOTEL"."HTCSLENM", "HOTELROOMBLOCKINVENTORY"."RBDATE", "HOTELROOMBLOCKINVENTORY"."HBNNO", "HOTEL"."HTDTCUTOFF", "HOTEL"."HTNCMPRMPER", "HOTEL"."HTNCMPRM", "EVENT_OPTIONS"."EODDATE", "HOTELROOMBLOCKS"."HBNAPPROVED", "HOTELROOMBLOCKS"."HBDTADD", "HOTELROOMBLOCKS"."HBDTXLD", "HOTELROOMBLOCKS"."HBDTAPPROVED", "EVENTS"."EMCNO", "HOTEL"."HTCSLEEMAIL", "HOTELROOMBLOCKS"."HBOVERWRITECUTOFFDATE", "HOTELROOMBLOCKS"."HBTEAMCUTOFFDATE", "HOTEL"."HTCACCTYPE"
- FROM   ((((("ICM"."dbo"."HOTEL" "HOTEL" INNER JOIN "ICM"."dbo"."EVENTS" "EVENTS" ON "HOTEL"."EMNNO"="EVENTS"."EMNNO") LEFT OUTER JOIN "ICM"."dbo"."HOTELROOMBLOCKS" "HOTELROOMBLOCKS" ON "HOTEL"."HTNNO"="HOTELROOMBLOCKS"."HTNNO") LEFT OUTER JOIN "ICM"."dbo"."RESERVATIONS" "RESERVATIONS" ON "HOTELROOMBLOCKS"."HBNNO"="RESERVATIONS"."HBNNO") LEFT OUTER JOIN "ICM"."dbo"."HOTELROOMBLOCKINVENTORY" "HOTELROOMBLOCKINVENTORY" ON "HOTELROOMBLOCKS"."HBNNO"="HOTELROOMBLOCKINVENTORY"."HBNNO") LEFT OUTER JOIN "ICM"."dbo"."ROOMCATEGORIES" "ROOMCATEGORIES" ON "HOTELROOMBLOCKS"."RCNNO"="ROOMCATEGORIES"."RCNNO") LEFT OUTER JOIN "ICM"."dbo"."EVENT_OPTIONS" "EVENT_OPTIONS" ON "EVENTS"."EMNNO"="EVENT_OPTIONS"."EMNNO"
- 
- 
- -- 590155090 rows
-
-
- SELECT "EVENTS"."EMNNO", "HOTEL"."HTNNO", "HOTEL"."HTCACRO", "HOTEL"."HTCDSC", "ROOMCATEGORIES"."RCCACRO", "ROOMCATEGORIES"."RCNNO", "HOTELROOMTYPECOSTS"."HCNCOST", "HOTELINVENTORY"."HINAMOUNTRESERVED", "HOTELROOMCATEGORIES"."HRNNO", "HOTELROOMCATEGORIES"."HRCBLOCKREQUEST", "HOTELROOMTYPECOSTS"."HCNDEPOSIT", "HOTEL"."HTCACCTYPE"
- FROM   (((("ICM"."dbo"."EVENTS" "EVENTS" INNER JOIN "ICM"."dbo"."HOTEL" "HOTEL" ON "EVENTS"."EMNNO"="HOTEL"."EMNNO") INNER JOIN "ICM"."dbo"."HOTELROOMCATEGORIES" "HOTELROOMCATEGORIES" ON "HOTEL"."HTNNO"="HOTELROOMCATEGORIES"."HTNNO") INNER JOIN "ICM"."dbo"."HOTELINVENTORY" "HOTELINVENTORY" ON "HOTELROOMCATEGORIES"."HRNNO"="HOTELINVENTORY"."HRNNO") INNER JOIN "ICM"."dbo"."ROOMCATEGORIES" "ROOMCATEGORIES" ON "HOTELROOMCATEGORIES"."RCNNO"="ROOMCATEGORIES"."RCNNO") INNER JOIN "ICM"."dbo"."HOTELROOMTYPECOSTS" "HOTELROOMTYPECOSTS" ON "HOTELINVENTORY"."HINNO"="HOTELROOMTYPECOSTS"."HINNO"
- WHERE  "HOTEL"."HTNNO"=20156
- ORDER BY "EVENTS"."EMNNO"
-
- -- 8 rows
-
-
-
-Crystal report formulas some of them are useful
-
-#Nites
-if {HOTELROOMBLOCKS.HBNAPPROVED}=0 then 
-    0
-else if totext ({RESERVATIONS.RSDTXLD})<>'' then
-    0
-else {RESERVATIONS.RSDTDEP}-{RESERVATIONS.RSDTARR}
-
-
-BlkPickup
-if {HOTELROOMBLOCKS.HBNAPPROVED}=0 then
-    0
-else if totext ({HOTELROOMBLOCKS.HBDTXLD})<>'' then
-    0
-else {HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED}+{HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS}-{HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE}
-
-
-Block NotPickedUp
-Maximum ({@Requested-From-Orig}, {@SubBlkSort})-Maximum ({@BlkPickup}, {@SubBlkSort})
-
-
-CanceledBlock
-if totext ({HOTELROOMBLOCKS.HBDTXLD})='' then
-    'NotXld'
-else if totext({HOTELROOMBLOCKS.HBDTXLD})<>'' then
-     'XLD'
-	 
-	 
-Cancelled
-If totext({RESERVATIONS.RSDTXLD})='' then 
-''
-else 'Xld'
-
-
-EventDateSort
-{EVENTS.EMDTBEG}
-
-Event-DisplayRunMaxPickup
-{@Event-RunMaxPickup}-Maximum ({@BlkPickup}, {@SubBlkSort})
-
-
-Event-DisplayRunMaxRequested
-{@Event-RunMaxRequested}-Maximum ({@Requested-From-Orig}, {@SubBlkSort})
-
-
-Event-NotPickedUp
-{@Event-RunMaxRequested}-{@Event-RunMaxPickup}
-
-EventResetRunMaxPickup
-whileprintingrecords;
-numbervar EventBlkMaxPickup:=0
-
-Event-ResetRunMaxRequested
-whileprintingrecords;
-numbervar EventBlkMax:=0
-
-Event-RunMaxPickup
-whileprintingrecords;
-numbervar EventBlkMaxPickup;
-EventBlkMaxPickup:=EventBlkMaxPickup+Maximum ({@BlkPickup}, {@SubBlkSort})
-
-Event-RunMaxRequested
-whileprintingrecords;
-numbervar EventBlkMax;
-EventBlkMax:=EventBlkMax+Maximum ({@Requested-From-Orig}, {@SubBlkSort})
-
-EventSort
-{EVENTS.EMCNM}+{EVENTS.EMCNO}
-
-
-HotelDepositAmount
-if {HOTEL.HTCACCTYPE}='DA' then
-    'DEPOSIT HOTEL'
-else ''
-
-
-Hotel-DisplayMaxBlkRequested
-{@Hotel-RunMaxRequested}-Maximum ({@Requested-From-Orig}, {@SubBlkSort})
-
-
-Hotel-DisplayRunMaxPickup
-{@Hotel-RunMaxPickup}-Maximum ({@BlkPickup}, {@SubBlkSort})
-
-Hotel-NotPickedUp
-{@Hotel-DisplayMaxBlkRequested}-{@Hotel-DisplayRunMaxPickup}
-
-Hotel-ResetRunMaxPickup
-whileprintingrecords;
-numbervar HotelBlkMaxPickup:=0
-
-Hotel-ResetRunMaxRequested
-whileprintingrecords;
-numbervar HotelBlkMax:=0
-
-Hotel-RunMaxPickup
-whileprintingrecords;
-numbervar HotelBlkMaxPickup;
-HotelBlkMaxPickup:=HotelBlkMaxPickup+Maximum ({@BlkPickup}, {@SubBlkSort})
-
-
-Hotel-RunMaxRequested
-whileprintingrecords;
-numbervar HotelBlkMax;
-HotelBlkMax:=HotelBlkMax+Maximum ({@Requested-From-Orig}, {@SubBlkSort})
-
-HotelSort
-{HOTEL.HTCDSC}+Totext({HOTEL.HTNNO})
-
-NameSort
-{RESERVATIONS.RSNNO}+{HOTELROOMBLOCKS.HBNNO}
-
-NotPickedup
-if {HOTELROOMBLOCKS.HBNAPPROVED}=0 then
-    0
-else if totext ({HOTELROOMBLOCKS.HBDTXLD})<>'' then
-    0
-else {HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE}
-
-
-Requested-From-Orig
-if {HOTELROOMBLOCKS.HBNAPPROVED}=0 then
-    0
-else if {@CanceledBlock}='Xld' then
-    0
-else    {HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED}+{HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS}
-
-
-Request-or-Added
-if totext ({HOTELROOMBLOCKS.HBDTREQUESTED})='' then 
-    {HOTELROOMBLOCKS.HBDTADD}
-else {HOTELROOMBLOCKS.HBDTREQUESTED}
-
-ResCount
-if totext({RESERVATIONS.RSDTXLD})='' then
-    1
-else 0
-
-
-
-SubBlkSort
-if totext ({HOTELROOMBLOCKS.HBCACRO})='' then
-{HOTELROOMBLOCKS.HBCNO}+totext ({HOTELROOMBLOCKS.HBNNO})
-else {HOTELROOMBLOCKS.HBCACRO}+totext ({HOTELROOMBLOCKS.HBNNO})
-
-
-
-Now Sub Report  crystal report formulas
-#RmsReserved
-{HOTELINVENTORY.HINAMOUNTRESERVED}
-
-
-DepositText
-if {HOTEL.HTCACCTYPE}='DA' then
-    'DEP: '
-else ''
-
-HotelRmCategory
-{ROOMCATEGORIES.RCCACRO}+totext ({ROOMCATEGORIES.RCNNO})
-
-HotelSort
-{HOTEL.HTCACRO}+totext({HOTEL.HTNNO})
-
-Suub reports needs HTNNO to run for information 
-
-
-
-
+ALTER   PROCEDURE dbo.sp_ICM_RPT_TT_RmBlkDtl_EventsByDateRange_RDLC  
+(  
+      @FromDate DATE = NULL,  
+      @ToDate   DATE = NULL,  
+      @EMNNO    INT = NULL  
+  
+    
+ -- exec sp_ICM_RPT_TT_RmBlkDtl_EventsByDateRange_RDLC
+)  
+AS  
+BEGIN  
+    SET NOCOUNT ON;  
+    SET ANSI_WARNINGS OFF;  
+  
+    ---------------------------------------------------------------------  
+    -- 1) Events in range (ONLY by EMDTBEG + EMDTEND)  
+    ---------------------------------------------------------------------  
+    CREATE TABLE #Events  
+    (  
+        EMNNO INT NOT NULL PRIMARY KEY  
+    );  
+  
+    INSERT INTO #Events(EMNNO)  
+    SELECT e.EMNNO  
+    FROM dbo.EVENTS e  
+    WHERE  
+        ( @EMNNO IS NULL OR e.EMNNO = @EMNNO )  
+        AND CAST(e.EMDTBEG AS DATE) >= '2024-11-13' --@FromDate  
+        AND CAST(e.EMDTEND AS DATE) <= '2025-11-17' -- @ToDate;  
+  
+    ---------------------------------------------------------------------  
+    -- 2) Block aggregation from HOTELROOMBLOCKINVENTORY (MAX logic)  
+    ---------------------------------------------------------------------  
+    CREATE TABLE #BlkAgg  
+    (  
+        EMNNO INT,  
+        HTNNO INT,  
+        HBNNO INT PRIMARY KEY,  
+  
+        SubBlkSort VARCHAR(200) NULL,  
+  
+        BlockRequestedMax INT NULL,  
+        BlockPickupMax    INT NULL,  
+        BlockNotPickedUp  INT NULL,  
+  
+        BlockCanceledFlag VARCHAR(10) NULL,   -- XLD / NotXld  
+        RequestOrAdded    DATETIME NULL  
+    );  
+  
+    INSERT INTO #BlkAgg  
+    (  
+        EMNNO, HTNNO, HBNNO, SubBlkSort,  
+        BlockRequestedMax, BlockPickupMax, BlockNotPickedUp,  
+        BlockCanceledFlag, RequestOrAdded  
+    )  
+    SELECT  
+        e.EMNNO,  
+        h.HTNNO,  
+        hb.HBNNO,  
+  
+        CASE  
+            WHEN ISNULL(LTRIM(RTRIM(hb.HBCACRO)),'') = ''  
+                THEN ISNULL(CONVERT(VARCHAR(30), hb.HBCNO),'') + CONVERT(VARCHAR(20), hb.HBNNO)  
+            ELSE ISNULL(hb.HBCACRO,'') + CONVERT(VARCHAR(20), hb.HBNNO)  
+        END AS SubBlkSort,  
+  
+        MAX(  
+            CASE  
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
+                WHEN hb.HBDTXLD IS NOT NULL THEN 0  
+                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0) + ISNULL(hbi.RBNADJUSTMENTS,0)  
+            END  
+        ) AS BlockRequestedMax,  
+  
+        MAX(  
+            CASE  
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
+                WHEN hb.HBDTXLD IS NOT NULL THEN 0  
+                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0)  
+                   + ISNULL(hbi.RBNADJUSTMENTS,0)  
+                   - ISNULL(hbi.RBNREMAININGAVAILABLE,0)  
+            END  
+        ) AS BlockPickupMax,  
+  
+        MAX(  
+            CASE  
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
+                WHEN hb.HBDTXLD IS NOT NULL THEN 0  
+                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0) + ISNULL(hbi.RBNADJUSTMENTS,0)  
+            END  
+        )  
+        -  
+        MAX(  
+            CASE  
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
+                WHEN hb.HBDTXLD IS NOT NULL THEN 0  
+                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0)  
+                   + ISNULL(hbi.RBNADJUSTMENTS,0)  
+                   - ISNULL(hbi.RBNREMAININGAVAILABLE,0)  
+            END  
+        ) AS BlockNotPickedUp,  
+  
+        CASE  
+            WHEN hb.HBDTXLD IS NULL THEN 'NotXld'  
+            WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), hb.HBDTXLD, 121))) = '' THEN 'NotXld'  
+            ELSE 'XLD'  
+        END AS BlockCanceledFlag,  
+  
+        CASE  
+            WHEN hb.HBDTREQUESTED IS NULL THEN hb.HBDTADD  
+            ELSE hb.HBDTREQUESTED  
+        END AS RequestOrAdded  
+  
+    FROM #Events ev  
+    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO  
+    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO  
+    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO  
+    LEFT  JOIN dbo.HOTELROOMBLOCKINVENTORY hbi ON hbi.HBNNO = hb.HBNNO  
+    GROUP BY  
+        e.EMNNO, h.HTNNO, hb.HBNNO, hb.HBCACRO, hb.HBCNO,  
+        hb.HBNAPPROVED, hb.HBDTXLD, hb.HBDTREQUESTED, hb.HBDTADD;  
+  
+    ---------------------------------------------------------------------  
+-- ✅ RESULTSET 1: DsHeader (Event + Hotel + Block header/name info)  
+    -- Minimal + unique rows (one row per Block)  
+    ---------------------------------------------------------------------  
+    SELECT  
+        -- Event  
+        e.EMNNO,  
+        e.EMCNO,  
+        e.EMCNM,  
+        e.EMDTBEG,  
+        e.EMDTEND,  
+  
+        EventDateSort = e.EMDTBEG,  
+        EventSort     = ISNULL(e.EMCNM,'') + ISNULL(CONVERT(VARCHAR(20), e.EMCNO),''),  
+  
+        -- Hotel  
+        h.HTNNO,  
+        h.HTCACRO,  
+        h.HTCDSC,  
+        h.HTDTCUTOFF,  
+        h.HTCSLENM,  
+        h.HTCSLETEL,  
+        h.HTCSLEEMAIL,  
+        h.HTCACCTYPE,  
+  
+        HotelSort = ISNULL(h.HTCDSC,'') + CONVERT(VARCHAR(20), h.HTNNO),  
+  
+        -- Block (header fields only)  
+        hb.HBNNO,  
+        hb.HBCACRO,  
+        hb.HBCNO,  
+        hb.HBCORG,  
+        hb.HBCFNM,  
+        hb.HBCLNM,  
+        hb.HBCTEL,  
+        hb.HBDTSTART,  
+        hb.HBNAPPROVED,  
+        hb.HBDTXLD,  
+        hb.HBDTAPPROVED,  
+        hb.HBOVERWRITECUTOFFDATE,  
+        hb.HBTEAMCUTOFFDATE,  
+  
+        ba.SubBlkSort,  
+        ba.BlockCanceledFlag,  
+        ba.RequestOrAdded,  
+  
+        HotelDepositAmount =  
+            CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEPOSIT HOTEL' ELSE '' END  
+  
+    FROM #Events ev  
+    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO  
+    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO  
+    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO  
+    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO  
+    ORDER BY  
+        e.EMDTBEG, ISNULL(e.EMCNM,''), e.EMCNO,  
+        ISNULL(h.HTCDSC,''), h.HTNNO,  
+        ba.SubBlkSort;  
+  
+    ---------------------------------------------------------------------  
+    -- RESULTSET 2: DsMain (Reservation detail rows RSNNO + computed totals)  
+    ---------------------------------------------------------------------  
+    SELECT  
+        e.EMNNO, e.EMCNO, e.EMCNM, e.EMDTBEG, e.EMDTEND,  
+        EventDateSort = e.EMDTBEG,  
+        EventSort     = ISNULL(e.EMCNM,'') + ISNULL(CONVERT(VARCHAR(20), e.EMCNO),''),  
+  
+        h.HTNNO, h.HTCACRO, h.HTCDSC, h.HTDTCUTOFF, h.HTCACCTYPE,  
+        HotelSort = ISNULL(h.HTCDSC,'') + CONVERT(VARCHAR(20), h.HTNNO),  
+  
+        hb.HBNNO, hb.HBCACRO, hb.HBCNO, hb.HBCORG, hb.HBCFNM, hb.HBCLNM, hb.HBCTEL,  
+        hb.HBNAPPROVED, hb.HBDTSTART, hb.HBDTREQUESTED, hb.HBDTADD, hb.HBDTXLD,  
+        hb.HBDTAPPROVED, hb.HBOVERWRITECUTOFFDATE, hb.HBTEAMCUTOFFDATE,  
+  
+        ba.SubBlkSort,  
+        ba.BlockCanceledFlag,  
+        ba.RequestOrAdded,  
+  
+        r.RSNNO, r.RSDTARR, r.RSDTDEP, r.RSDTXLD,  
+  
+        Cancelled =  
+            CASE  
+                WHEN r.RSDTXLD IS NULL THEN ''  
+                WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), r.RSDTXLD, 121))) = '' THEN ''  
+                ELSE 'Xld'  
+            END,  
+  
+        ResCount =  
+            CASE  
+                WHEN r.RSDTXLD IS NULL THEN 1  
+                WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), r.RSDTXLD, 121))) = '' THEN 1  
+                ELSE 0  
+            END,  
+  
+        Nites =  
+            CASE  
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
+                WHEN r.RSDTXLD IS NOT NULL THEN 0  
+                ELSE DATEDIFF(DAY, CAST(r.RSDTARR AS DATE), CAST(r.RSDTDEP AS DATE))  
+            END,  
+  
+        NameSort = CONVERT(VARCHAR(20), r.RSNNO) + CONVERT(VARCHAR(20), hb.HBNNO),  
+  
+        HotelDepositAmount =  
+            CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEPOSIT HOTEL' ELSE '' END,  
+  
+        BlockRequestedMax = ISNULL(ba.BlockRequestedMax,0),  
+        BlockPickupMax    = ISNULL(ba.BlockPickupMax,0),  
+        BlockNotPickedUp  = ISNULL(ba.BlockNotPickedUp,0),  
+  
+        HotelRunMaxRequested =  
+            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER  
+            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
+  
+        HotelRunMaxPickup =  
+            SUM(ISNULL(ba.BlockPickupMax,0)) OVER  
+            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
+  
+        HotelNotPickedUp =  
+            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER  
+            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING)  
+            -  
+            SUM(ISNULL(ba.BlockPickupMax,0)) OVER  
+            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
+  
+        EventRunMaxRequested =  
+            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER  
+            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
+  
+        EventRunMaxPickup =  
+            SUM(ISNULL(ba.BlockPickupMax,0)) OVER  
+            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
+  
+        EventNotPickedUp =  
+            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER  
+            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING)  
+            -  
+            SUM(ISNULL(ba.BlockPickupMax,0)) OVER  
+            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING)  
+  
+    FROM #Events ev  
+    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO  
+    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO  
+    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO  
+    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO  
+    LEFT JOIN dbo.RESERVATIONS r  
+        ON r.HBNNO = hb.HBNNO  
+        AND CAST(r.RSDTARR AS DATE) <= @ToDate  
+        AND CAST(r.RSDTDEP AS DATE) >= @FromDate  
+    ORDER BY  
+        e.EMDTBEG, ISNULL(e.EMCNM,''), e.EMCNO,  
+        ISNULL(h.HTCDSC,''), h.HTNNO,  
+        ba.SubBlkSort, r.RSNNO;  
+  
+    ---------------------------------------------------------------------  
+    -- RESULTSET 3: DsHotelRates (Subreport data)  
+    ---------------------------------------------------------------------  
+    SELECT   
+        e.EMNNO,  
+        h.HTNNO, h.HTCACRO, h.HTCDSC, h.HTCACCTYPE,  
+        rc.RCCACRO, rc.RCNNO,  
+        hrtc.HCNCOST,  
+        hrtc.HCNDEPOSIT,  
+        RmsReserved = hi.HINAMOUNTRESERVED,  
+        DepositText = CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEP: ' ELSE '' END,  
+        HotelRmCategory = ISNULL(rc.RCCACRO,'') + CONVERT(VARCHAR(20), rc.RCNNO),  
+        HotelSort = ISNULL(h.HTCACRO,'') + CONVERT(VARCHAR(20), h.HTNNO)  
+    FROM #Events ev  
+    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO  
+    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO  
+    INNER JOIN dbo.HOTELROOMCATEGORIES hrc ON hrc.HTNNO = h.HTNNO  
+    INNER JOIN dbo.ROOMCATEGORIES rc ON rc.RCNNO = hrc.RCNNO  
+    INNER JOIN dbo.HOTELINVENTORY hi ON hi.HRNNO = hrc.HRNNO  
+    INNER JOIN dbo.HOTELROOMTYPECOSTS hrtc ON hrtc.HINNO = hi.HINNO  
+    ORDER BY e.EMNNO, h.HTNNO, rc.RCCACRO, rc.RCNNO;  
+  
+    DROP TABLE #BlkAgg;  
+    DROP TABLE #Events;  
+END  
