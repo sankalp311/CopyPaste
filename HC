@@ -1,301 +1,408 @@
-ALTER   PROCEDURE dbo.sp_ICM_RPT_TT_RmBlkDtl_EventsByDateRange_RDLC  
-(  
-      @FromDate DATE = NULL,  
-      @ToDate   DATE = NULL,  
-      @EMNNO    INT = NULL  
-  
-    
- -- exec sp_ICM_RPT_TT_RmBlkDtl_EventsByDateRange_RDLC
-)  
-AS  
-BEGIN  
-    SET NOCOUNT ON;  
-    SET ANSI_WARNINGS OFF;  
-  
-    ---------------------------------------------------------------------  
-    -- 1) Events in range (ONLY by EMDTBEG + EMDTEND)  
-    ---------------------------------------------------------------------  
-    CREATE TABLE #Events  
-    (  
-        EMNNO INT NOT NULL PRIMARY KEY  
-    );  
-  
-    INSERT INTO #Events(EMNNO)  
-    SELECT e.EMNNO  
-    FROM dbo.EVENTS e  
-    WHERE  
-        ( @EMNNO IS NULL OR e.EMNNO = @EMNNO )  
-        AND CAST(e.EMDTBEG AS DATE) >= '2024-11-13' --@FromDate  
-        AND CAST(e.EMDTEND AS DATE) <= '2025-11-17' -- @ToDate;  
-  
-    ---------------------------------------------------------------------  
-    -- 2) Block aggregation from HOTELROOMBLOCKINVENTORY (MAX logic)  
-    ---------------------------------------------------------------------  
-    CREATE TABLE #BlkAgg  
-    (  
-        EMNNO INT,  
-        HTNNO INT,  
-        HBNNO INT PRIMARY KEY,  
-  
-        SubBlkSort VARCHAR(200) NULL,  
-  
-        BlockRequestedMax INT NULL,  
-        BlockPickupMax    INT NULL,  
-        BlockNotPickedUp  INT NULL,  
-  
-        BlockCanceledFlag VARCHAR(10) NULL,   -- XLD / NotXld  
-        RequestOrAdded    DATETIME NULL  
-    );  
-  
-    INSERT INTO #BlkAgg  
-    (  
-        EMNNO, HTNNO, HBNNO, SubBlkSort,  
-        BlockRequestedMax, BlockPickupMax, BlockNotPickedUp,  
-        BlockCanceledFlag, RequestOrAdded  
-    )  
-    SELECT  
-        e.EMNNO,  
-        h.HTNNO,  
-        hb.HBNNO,  
-  
-        CASE  
-            WHEN ISNULL(LTRIM(RTRIM(hb.HBCACRO)),'') = ''  
-                THEN ISNULL(CONVERT(VARCHAR(30), hb.HBCNO),'') + CONVERT(VARCHAR(20), hb.HBNNO)  
-            ELSE ISNULL(hb.HBCACRO,'') + CONVERT(VARCHAR(20), hb.HBNNO)  
-        END AS SubBlkSort,  
-  
-        MAX(  
-            CASE  
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
-                WHEN hb.HBDTXLD IS NOT NULL THEN 0  
-                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0) + ISNULL(hbi.RBNADJUSTMENTS,0)  
-            END  
-        ) AS BlockRequestedMax,  
-  
-        MAX(  
-            CASE  
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
-                WHEN hb.HBDTXLD IS NOT NULL THEN 0  
-                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0)  
-                   + ISNULL(hbi.RBNADJUSTMENTS,0)  
-                   - ISNULL(hbi.RBNREMAININGAVAILABLE,0)  
-            END  
-        ) AS BlockPickupMax,  
-  
-        MAX(  
-            CASE  
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
-                WHEN hb.HBDTXLD IS NOT NULL THEN 0  
-                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0) + ISNULL(hbi.RBNADJUSTMENTS,0)  
-            END  
-        )  
-        -  
-        MAX(  
-            CASE  
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
-                WHEN hb.HBDTXLD IS NOT NULL THEN 0  
-                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0)  
-                   + ISNULL(hbi.RBNADJUSTMENTS,0)  
-                   - ISNULL(hbi.RBNREMAININGAVAILABLE,0)  
-            END  
-        ) AS BlockNotPickedUp,  
-  
-        CASE  
-            WHEN hb.HBDTXLD IS NULL THEN 'NotXld'  
-            WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), hb.HBDTXLD, 121))) = '' THEN 'NotXld'  
-            ELSE 'XLD'  
-        END AS BlockCanceledFlag,  
-  
-        CASE  
-            WHEN hb.HBDTREQUESTED IS NULL THEN hb.HBDTADD  
-            ELSE hb.HBDTREQUESTED  
-        END AS RequestOrAdded  
-  
-    FROM #Events ev  
-    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO  
-    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO  
-    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO  
-    LEFT  JOIN dbo.HOTELROOMBLOCKINVENTORY hbi ON hbi.HBNNO = hb.HBNNO  
-    GROUP BY  
-        e.EMNNO, h.HTNNO, hb.HBNNO, hb.HBCACRO, hb.HBCNO,  
-        hb.HBNAPPROVED, hb.HBDTXLD, hb.HBDTREQUESTED, hb.HBDTADD;  
-  
-    ---------------------------------------------------------------------  
--- ✅ RESULTSET 1: DsHeader (Event + Hotel + Block header/name info)  
-    -- Minimal + unique rows (one row per Block)  
-    ---------------------------------------------------------------------  
-    SELECT  
-        -- Event  
-        e.EMNNO,  
-        e.EMCNO,  
-        e.EMCNM,  
-        e.EMDTBEG,  
-        e.EMDTEND,  
-  
-        EventDateSort = e.EMDTBEG,  
-        EventSort     = ISNULL(e.EMCNM,'') + ISNULL(CONVERT(VARCHAR(20), e.EMCNO),''),  
-  
-        -- Hotel  
-        h.HTNNO,  
-        h.HTCACRO,  
-        h.HTCDSC,  
-        h.HTDTCUTOFF,  
-        h.HTCSLENM,  
-        h.HTCSLETEL,  
-        h.HTCSLEEMAIL,  
-        h.HTCACCTYPE,  
-  
-        HotelSort = ISNULL(h.HTCDSC,'') + CONVERT(VARCHAR(20), h.HTNNO),  
-  
-        -- Block (header fields only)  
-        hb.HBNNO,  
-        hb.HBCACRO,  
-        hb.HBCNO,  
-        hb.HBCORG,  
-        hb.HBCFNM,  
-        hb.HBCLNM,  
-        hb.HBCTEL,  
-        hb.HBDTSTART,  
-        hb.HBNAPPROVED,  
-        hb.HBDTXLD,  
-        hb.HBDTAPPROVED,  
-        hb.HBOVERWRITECUTOFFDATE,  
-        hb.HBTEAMCUTOFFDATE,  
-  
-        ba.SubBlkSort,  
-        ba.BlockCanceledFlag,  
-        ba.RequestOrAdded,  
-  
-        HotelDepositAmount =  
-            CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEPOSIT HOTEL' ELSE '' END  
-  
-    FROM #Events ev  
-    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO  
-    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO  
-    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO  
-    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO  
-    ORDER BY  
-        e.EMDTBEG, ISNULL(e.EMCNM,''), e.EMCNO,  
-        ISNULL(h.HTCDSC,''), h.HTNNO,  
-        ba.SubBlkSort;  
-  
-    ---------------------------------------------------------------------  
-    -- RESULTSET 2: DsMain (Reservation detail rows RSNNO + computed totals)  
-    ---------------------------------------------------------------------  
-    SELECT  
-        e.EMNNO, e.EMCNO, e.EMCNM, e.EMDTBEG, e.EMDTEND,  
-        EventDateSort = e.EMDTBEG,  
-        EventSort     = ISNULL(e.EMCNM,'') + ISNULL(CONVERT(VARCHAR(20), e.EMCNO),''),  
-  
-        h.HTNNO, h.HTCACRO, h.HTCDSC, h.HTDTCUTOFF, h.HTCACCTYPE,  
-        HotelSort = ISNULL(h.HTCDSC,'') + CONVERT(VARCHAR(20), h.HTNNO),  
-  
-        hb.HBNNO, hb.HBCACRO, hb.HBCNO, hb.HBCORG, hb.HBCFNM, hb.HBCLNM, hb.HBCTEL,  
-        hb.HBNAPPROVED, hb.HBDTSTART, hb.HBDTREQUESTED, hb.HBDTADD, hb.HBDTXLD,  
-        hb.HBDTAPPROVED, hb.HBOVERWRITECUTOFFDATE, hb.HBTEAMCUTOFFDATE,  
-  
-        ba.SubBlkSort,  
-        ba.BlockCanceledFlag,  
-        ba.RequestOrAdded,  
-  
-        r.RSNNO, r.RSDTARR, r.RSDTDEP, r.RSDTXLD,  
-  
-        Cancelled =  
-            CASE  
-                WHEN r.RSDTXLD IS NULL THEN ''  
-                WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), r.RSDTXLD, 121))) = '' THEN ''  
-                ELSE 'Xld'  
-            END,  
-  
-        ResCount =  
-            CASE  
-                WHEN r.RSDTXLD IS NULL THEN 1  
-                WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), r.RSDTXLD, 121))) = '' THEN 1  
-                ELSE 0  
-            END,  
-  
-        Nites =  
-            CASE  
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0  
-                WHEN r.RSDTXLD IS NOT NULL THEN 0  
-                ELSE DATEDIFF(DAY, CAST(r.RSDTARR AS DATE), CAST(r.RSDTDEP AS DATE))  
-            END,  
-  
-        NameSort = CONVERT(VARCHAR(20), r.RSNNO) + CONVERT(VARCHAR(20), hb.HBNNO),  
-  
-        HotelDepositAmount =  
-            CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEPOSIT HOTEL' ELSE '' END,  
-  
-        BlockRequestedMax = ISNULL(ba.BlockRequestedMax,0),  
-        BlockPickupMax    = ISNULL(ba.BlockPickupMax,0),  
-        BlockNotPickedUp  = ISNULL(ba.BlockNotPickedUp,0),  
-  
-        HotelRunMaxRequested =  
-            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER  
-            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
-  
-        HotelRunMaxPickup =  
-            SUM(ISNULL(ba.BlockPickupMax,0)) OVER  
-            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
-  
-        HotelNotPickedUp =  
-            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER  
-            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING)  
-            -  
-            SUM(ISNULL(ba.BlockPickupMax,0)) OVER  
-            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
-  
-        EventRunMaxRequested =  
-            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER  
-            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
-  
-        EventRunMaxPickup =  
-            SUM(ISNULL(ba.BlockPickupMax,0)) OVER  
-            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),  
-  
-        EventNotPickedUp =  
-            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER  
-            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING)  
-            -  
-            SUM(ISNULL(ba.BlockPickupMax,0)) OVER  
-            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING)  
-  
-    FROM #Events ev  
-    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO  
-    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO  
-    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO  
-    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO  
-    LEFT JOIN dbo.RESERVATIONS r  
-        ON r.HBNNO = hb.HBNNO  
-        AND CAST(r.RSDTARR AS DATE) <= @ToDate  
-        AND CAST(r.RSDTDEP AS DATE) >= @FromDate  
-    ORDER BY  
-        e.EMDTBEG, ISNULL(e.EMCNM,''), e.EMCNO,  
-        ISNULL(h.HTCDSC,''), h.HTNNO,  
-        ba.SubBlkSort, r.RSNNO;  
-  
-    ---------------------------------------------------------------------  
-    -- RESULTSET 3: DsHotelRates (Subreport data)  
-    ---------------------------------------------------------------------  
-    SELECT   
-        e.EMNNO,  
-        h.HTNNO, h.HTCACRO, h.HTCDSC, h.HTCACCTYPE,  
-        rc.RCCACRO, rc.RCNNO,  
-        hrtc.HCNCOST,  
-        hrtc.HCNDEPOSIT,  
-        RmsReserved = hi.HINAMOUNTRESERVED,  
-        DepositText = CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEP: ' ELSE '' END,  
-        HotelRmCategory = ISNULL(rc.RCCACRO,'') + CONVERT(VARCHAR(20), rc.RCNNO),  
-        HotelSort = ISNULL(h.HTCACRO,'') + CONVERT(VARCHAR(20), h.HTNNO)  
-    FROM #Events ev  
-    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO  
-    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO  
-    INNER JOIN dbo.HOTELROOMCATEGORIES hrc ON hrc.HTNNO = h.HTNNO  
-    INNER JOIN dbo.ROOMCATEGORIES rc ON rc.RCNNO = hrc.RCNNO  
-    INNER JOIN dbo.HOTELINVENTORY hi ON hi.HRNNO = hrc.HRNNO  
-    INNER JOIN dbo.HOTELROOMTYPECOSTS hrtc ON hrtc.HINNO = hi.HINNO  
-    ORDER BY e.EMNNO, h.HTNNO, rc.RCCACRO, rc.RCNNO;  
-  
-    DROP TABLE #BlkAgg;  
-    DROP TABLE #Events;  
-END  
+ALTER PROCEDURE dbo.sp_ICM_RPT_TT_RmBlkDtl_EventsByDateRange_RDLC
+(
+      @FromDate DATE = '2024-01-13',
+      @ToDate   DATE = '2024-11-17',
+      @EMNNO    INT = NULL
+)
+AS
+BEGIN
+    SET NOCOUNT ON;
+    SET ANSI_WARNINGS OFF;
+
+    -- ✅ avoid NULL date issues
+    DECLARE @F DATE = ISNULL(@FromDate, '19000101');
+    DECLARE @T DATE = ISNULL(@ToDate,   '99991231');
+
+    ---------------------------------------------------------------------
+    -- 1) Events in range (ONLY by EMDTBEG + EMDTEND)
+    ---------------------------------------------------------------------
+    CREATE TABLE #Events
+    (
+        EMNNO INT NOT NULL PRIMARY KEY
+    );
+
+    INSERT INTO #Events(EMNNO)
+    SELECT e.EMNNO
+    FROM dbo.EVENTS e
+    WHERE
+        ( @EMNNO IS NULL OR e.EMNNO = @EMNNO )
+        AND CAST(e.EMDTBEG AS DATE) >= @F
+        AND CAST(e.EMDTEND AS DATE) <= @T;
+
+    ---------------------------------------------------------------------
+    -- 2) Block aggregation from HOTELROOMBLOCKINVENTORY (MAX logic)
+    ---------------------------------------------------------------------
+    CREATE TABLE #BlkAgg
+    (
+        EMNNO INT,
+        HTNNO INT,
+        HBNNO INT PRIMARY KEY,
+
+        SubBlkSort VARCHAR(200) NULL,
+
+        BlockRequestedMax INT NULL,
+        BlockPickupMax    INT NULL,
+        BlockNotPickedUp  INT NULL,
+
+        BlockCanceledFlag VARCHAR(10) NULL,
+        RequestOrAdded    DATETIME NULL
+    );
+
+    INSERT INTO #BlkAgg
+    (
+        EMNNO, HTNNO, HBNNO, SubBlkSort,
+        BlockRequestedMax, BlockPickupMax, BlockNotPickedUp,
+        BlockCanceledFlag, RequestOrAdded
+    )
+    SELECT
+        e.EMNNO,
+        h.HTNNO,
+        hb.HBNNO,
+
+        CASE
+            WHEN ISNULL(LTRIM(RTRIM(hb.HBCACRO)),'') = ''
+                THEN ISNULL(CONVERT(VARCHAR(30), hb.HBCNO),'') + CONVERT(VARCHAR(20), hb.HBNNO)
+            ELSE ISNULL(hb.HBCACRO,'') + CONVERT(VARCHAR(20), hb.HBNNO)
+        END AS SubBlkSort,
+
+        MAX(
+            CASE
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
+                WHEN hb.HBDTXLD IS NOT NULL THEN 0
+                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0) + ISNULL(hbi.RBNADJUSTMENTS,0)
+            END
+        ) AS BlockRequestedMax,
+
+        MAX(
+            CASE
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
+                WHEN hb.HBDTXLD IS NOT NULL THEN 0
+                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0)
+                   + ISNULL(hbi.RBNADJUSTMENTS,0)
+                   - ISNULL(hbi.RBNREMAININGAVAILABLE,0)
+            END
+        ) AS BlockPickupMax,
+
+        MAX(
+            CASE
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
+                WHEN hb.HBDTXLD IS NOT NULL THEN 0
+                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0) + ISNULL(hbi.RBNADJUSTMENTS,0)
+            END
+        )
+        -
+        MAX(
+            CASE
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
+                WHEN hb.HBDTXLD IS NOT NULL THEN 0
+                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0)
+                   + ISNULL(hbi.RBNADJUSTMENTS,0)
+                   - ISNULL(hbi.RBNREMAININGAVAILABLE,0)
+            END
+        ) AS BlockNotPickedUp,
+
+        CASE
+            WHEN hb.HBDTXLD IS NULL THEN 'NotXld'
+            WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), hb.HBDTXLD, 121))) = '' THEN 'NotXld'
+            ELSE 'XLD'
+        END AS BlockCanceledFlag,
+
+        CASE
+            WHEN hb.HBDTREQUESTED IS NULL THEN hb.HBDTADD
+            ELSE hb.HBDTREQUESTED
+        END AS RequestOrAdded
+
+    FROM #Events ev
+    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO
+    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO
+    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
+    LEFT  JOIN dbo.HOTELROOMBLOCKINVENTORY hbi ON hbi.HBNNO = hb.HBNNO
+    GROUP BY
+        e.EMNNO, h.HTNNO, hb.HBNNO, hb.HBCACRO, hb.HBCNO,
+        hb.HBNAPPROVED, hb.HBDTXLD, hb.HBDTREQUESTED, hb.HBDTADD;
+
+    ---------------------------------------------------------------------
+    -- ✅ NEW: build DISTINCT room categories per Block (HBNNO)
+    -- This will be used for:
+    --   (a) single RCCACRO in Resultset 2
+    --   (b) distinct RCCACRO per HBNNO in Resultset 3
+    ---------------------------------------------------------------------
+    CREATE TABLE #BlkCat
+    (
+        HBNNO   INT NOT NULL,
+        RCNNO   INT NOT NULL,
+        RCCACRO VARCHAR(50) NULL,
+        CONSTRAINT PK_BlkCat PRIMARY KEY (HBNNO, RCNNO)
+    );
+
+    INSERT INTO #BlkCat(HBNNO, RCNNO, RCCACRO)
+    SELECT DISTINCT
+        ba.HBNNO,
+        rc.RCNNO,
+        rc.RCCACRO
+    FROM #BlkAgg ba
+    INNER JOIN dbo.HOTELROOMBLOCKINVENTORY hbi ON hbi.HBNNO = ba.HBNNO
+    INNER JOIN dbo.HOTELINVENTORY hi ON hi.HINNO = hbi.HINNO      -- ⚠️ if HINNO not exists, tell me correct column
+    INNER JOIN dbo.HOTELROOMCATEGORIES hrc ON hrc.HRNNO = hi.HRNNO
+    INNER JOIN dbo.ROOMCATEGORIES rc ON rc.RCNNO = hrc.RCNNO
+    WHERE ISNULL(LTRIM(RTRIM(rc.RCCACRO)),'') <> '';
+
+    ---------------------------------------------------------------------
+    -- RESULTSET 1: DsHeader (UNCHANGED SELECT LIST)
+    ---------------------------------------------------------------------
+    SELECT
+        e.EMNNO,
+        e.EMCNO,
+        e.EMCNM,
+        e.EMDTBEG,
+        e.EMDTEND,
+
+        EventDateSort = e.EMDTBEG,
+        EventSort     = ISNULL(e.EMCNM,'') + ISNULL(CONVERT(VARCHAR(20), e.EMCNO),''),
+
+        h.HTNNO,
+        h.HTCACRO,
+        h.HTCDSC,
+        h.HTDTCUTOFF,
+        h.HTCSLENM,
+        h.HTCSLETEL,
+        h.HTCSLEEMAIL,
+        h.HTCACCTYPE,
+
+        HotelSort = ISNULL(h.HTCDSC,'') + CONVERT(VARCHAR(20), h.HTNNO),
+
+        hb.HBNNO,
+        hb.HBCACRO,
+        hb.HBCNO,
+        hb.HBCORG,
+        hb.HBCFNM,
+        hb.HBCLNM,
+        hb.HBCTEL,
+        hb.HBDTSTART,
+        hb.HBNAPPROVED,
+        hb.HBDTXLD,
+        hb.HBDTAPPROVED,
+        hb.HBOVERWRITECUTOFFDATE,
+        hb.HBTEAMCUTOFFDATE,
+
+        ba.SubBlkSort,
+        ba.BlockCanceledFlag,
+        ba.RequestOrAdded,
+
+        HotelDepositAmount =
+            CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEPOSIT HOTEL' ELSE '' END
+
+    FROM #Events ev
+    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO
+    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO
+    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
+    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO
+    ORDER BY
+        e.EMDTBEG, ISNULL(e.EMCNM,''), e.EMCNO,
+        ISNULL(h.HTCDSC,''), h.HTNNO,
+        ba.SubBlkSort;
+
+    ---------------------------------------------------------------------
+    -- RESULTSET 2: DsMain (KEEP YOUR SELECT LIST SAME + ADD RCCACRO at END)
+    ---------------------------------------------------------------------
+    SELECT
+        e.EMNNO, e.EMCNO, e.EMCNM, e.EMDTBEG, e.EMDTEND,
+        EventDateSort = e.EMDTBEG,
+        EventSort     = ISNULL(e.EMCNM,'') + ISNULL(CONVERT(VARCHAR(20), e.EMCNO),''),
+
+        h.HTNNO, h.HTCACRO, h.HTCDSC, h.HTDTCUTOFF, h.HTCACCTYPE,
+        HotelSort = ISNULL(h.HTCDSC,'') + CONVERT(VARCHAR(20), h.HTNNO),
+
+        hb.HBNNO, hb.HBCACRO, hb.HBCNO, hb.HBCORG, hb.HBCFNM, hb.HBCLNM, hb.HBCTEL,
+        hb.HBNAPPROVED, hb.HBDTSTART, hb.HBDTREQUESTED, hb.HBDTADD, hb.HBDTXLD,
+        hb.HBDTAPPROVED, hb.HBOVERWRITECUTOFFDATE, hb.HBTEAMCUTOFFDATE,
+
+        ba.SubBlkSort,
+        ba.BlockCanceledFlag,
+        ba.RequestOrAdded,
+
+        r.RSNNO, r.RSDTARR, r.RSDTDEP, r.RSDTXLD,
+
+        Cancelled =
+            CASE
+                WHEN r.RSDTXLD IS NULL THEN ''
+                WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), r.RSDTXLD, 121))) = '' THEN ''
+                ELSE 'Xld'
+            END,
+
+        ResCount =
+            CASE
+                WHEN r.RSDTXLD IS NULL THEN 1
+                WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), r.RSDTXLD, 121))) = '' THEN 1
+                ELSE 0
+            END,
+
+        Nites =
+            CASE
+                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
+                WHEN r.RSDTXLD IS NOT NULL THEN 0
+                ELSE DATEDIFF(DAY, CAST(r.RSDTARR AS DATE), CAST(r.RSDTDEP AS DATE))
+            END,
+
+        NameSort = CONVERT(VARCHAR(20), r.RSNNO) + CONVERT(VARCHAR(20), hb.HBNNO),
+
+        HotelDepositAmount =
+            CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEPOSIT HOTEL' ELSE '' END,
+
+        BlockRequestedMax = ISNULL(ba.BlockRequestedMax,0),
+        BlockPickupMax    = ISNULL(ba.BlockPickupMax,0),
+        BlockNotPickedUp  = ISNULL(ba.BlockNotPickedUp,0),
+
+        HotelRunMaxRequested =
+            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER
+            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
+
+        HotelRunMaxPickup =
+            SUM(ISNULL(ba.BlockPickupMax,0)) OVER
+            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
+
+        HotelNotPickedUp =
+            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER
+            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING)
+            -
+            SUM(ISNULL(ba.BlockPickupMax,0)) OVER
+            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
+
+        EventRunMaxRequested =
+            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER
+            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
+
+        EventRunMaxPickup =
+            SUM(ISNULL(ba.BlockPickupMax,0)) OVER
+            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
+
+        EventNotPickedUp =
+            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER
+            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING)
+            -
+            SUM(ISNULL(ba.BlockPickupMax,0)) OVER
+            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
+
+        -- ✅ ADDED AT END (single RCCACRO per HBNNO)
+        RCCACRO = CatPick.RCCACRO
+
+    FROM #Events ev
+    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO
+    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO
+    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
+    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO
+
+    -- pick ONE RCCACRO for the block (alphabetical). Change ORDER BY if you want different rule.
+    OUTER APPLY
+    (
+        SELECT TOP (1) bc.RCCACRO
+        FROM #BlkCat bc
+        WHERE bc.HBNNO = hb.HBNNO
+        ORDER BY bc.RCCACRO
+    ) CatPick
+
+    LEFT JOIN dbo.RESERVATIONS r
+        ON r.HBNNO = hb.HBNNO
+        AND CAST(r.RSDTARR AS DATE) <= @T
+        AND CAST(r.RSDTDEP AS DATE) >= @F
+    ORDER BY
+        e.EMDTBEG, ISNULL(e.EMCNM,''), e.EMCNO,
+        ISNULL(h.HTCDSC,''), h.HTNNO,
+        ba.SubBlkSort, r.RSNNO;
+
+
+
+
+		CREATE TABLE #MainCats
+(
+    EMNNO INT NOT NULL,
+    HTNNO INT NOT NULL,
+    RCNNO INT NOT NULL,
+    PRIMARY KEY (EMNNO, HTNNO, RCNNO)
+);
+
+INSERT INTO #MainCats (EMNNO, HTNNO, RCNNO)
+SELECT DISTINCT
+    e.EMNNO,
+    h.HTNNO,
+    hbi.RCNNO
+FROM #Events ev
+JOIN dbo.EVENTS e ON e.EMNNO = ev.EMNNO
+JOIN dbo.HOTEL h  ON h.EMNNO = e.EMNNO
+JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
+JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO
+JOIN dbo.HOTELROOMBLOCKINVENTORY hbi ON hbi.HBNNO = hb.HBNNO
+LEFT JOIN dbo.RESERVATIONS r
+    ON r.HBNNO = hb.HBNNO
+    AND CAST(r.RSDTARR AS DATE) <= @ToDate
+    AND CAST(r.RSDTDEP AS DATE) >= @FromDate
+WHERE
+    -- same “present in DsMain” logic: if you want only rows with reservations, uncomment next line
+    -- r.RSNNO IS NOT NULL
+    1 = 1;
+
+
+
+
+    ---------------------------------------------------------------------
+    -- RESULTSET 3: DsHotelRates (KEEP YOUR SELECT LIST SAME + ADD block keys at END)
+    -- DISTINCT RCCACRO per HBNNO comes from #BlkCat join (1 row per HBNNO+RCNNO)
+    ---------------------------------------------------------------------
+    SELECT DISTINCT
+        e.EMNNO,
+        h.HTNNO, h.HTCACRO, h.HTCDSC, h.HTCACCTYPE,
+        rc.RCCACRO, rc.RCNNO,
+        --hrtc.HCNCOST,
+        --hrtc.HCNDEPOSIT,
+        --RmsReserved = hi.HINAMOUNTRESERVED,
+
+		CostPick.HCNCOST,
+		CostPick.HCNDEPOSIT,
+		RmsReserved = CostPick.HINAMOUNTRESERVED,
+
+
+
+        DepositText = CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEP: ' ELSE '' END,
+        HotelRmCategory = ISNULL(rc.RCCACRO,'') + CONVERT(VARCHAR(20), rc.RCNNO),
+        HotelSort = ISNULL(h.HTCACRO,'') + CONVERT(VARCHAR(20), h.HTNNO),
+
+        -- ✅ ADDED AT END (for subreport link/filter)
+        hb.HBNNO,
+        hb.HBCACRO,
+        hb.HBCNO
+
+    FROM #Events ev
+    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO
+    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO
+
+    -- ✅ bring block context
+    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
+    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO
+
+    -- ✅ distinct categories per block
+    INNER JOIN #BlkCat bc ON bc.HBNNO = hb.HBNNO
+
+    -- original joins (same tables as before) but now driven by block category
+    INNER JOIN dbo.HOTELROOMCATEGORIES hrc ON hrc.HTNNO = h.HTNNO AND hrc.RCNNO = bc.RCNNO
+    INNER JOIN dbo.ROOMCATEGORIES rc ON rc.RCNNO = hrc.RCNNO
+    --INNER JOIN dbo.HOTELINVENTORY hi ON hi.HRNNO = hrc.HRNNO
+    --INNER JOIN dbo.HOTELROOMTYPECOSTS hrtc ON hrtc.HINNO = hi.HINNO
+	OUTER APPLY
+(
+    SELECT TOP (1)
+        hrtc2.HCNCOST,
+        hrtc2.HCNDEPOSIT,
+        hi2.HINAMOUNTRESERVED
+    FROM dbo.HOTELINVENTORY hi2
+    INNER JOIN dbo.HOTELROOMTYPECOSTS hrtc2
+        ON hrtc2.HINNO = hi2.HINNO
+    WHERE hi2.HRNNO = hrc.HRNNO
+    ORDER BY hrtc2.HCNCOST DESC, hrtc2.HINNO DESC
+) CostPick
+
+    ORDER BY e.EMNNO, h.HTNNO, rc.RCCACRO, rc.RCNNO, hb.HBNNO;
+
+    DROP TABLE #BlkCat;
+    DROP TABLE #BlkAgg;
+    DROP TABLE #Events;
+END
