@@ -1,408 +1,419 @@
-ALTER PROCEDURE dbo.sp_ICM_RPT_TT_RmBlkDtl_EventsByDateRange_RDLC
-(
-      @FromDate DATE = '2024-01-13',
-      @ToDate   DATE = '2024-11-17',
-      @EMNNO    INT = NULL
-)
-AS
-BEGIN
-    SET NOCOUNT ON;
-    SET ANSI_WARNINGS OFF;
-
-    -- ✅ avoid NULL date issues
-    DECLARE @F DATE = ISNULL(@FromDate, '19000101');
-    DECLARE @T DATE = ISNULL(@ToDate,   '99991231');
-
-    ---------------------------------------------------------------------
-    -- 1) Events in range (ONLY by EMDTBEG + EMDTEND)
-    ---------------------------------------------------------------------
-    CREATE TABLE #Events
-    (
-        EMNNO INT NOT NULL PRIMARY KEY
-    );
-
-    INSERT INTO #Events(EMNNO)
-    SELECT e.EMNNO
-    FROM dbo.EVENTS e
-    WHERE
-        ( @EMNNO IS NULL OR e.EMNNO = @EMNNO )
-        AND CAST(e.EMDTBEG AS DATE) >= @F
-        AND CAST(e.EMDTEND AS DATE) <= @T;
-
-    ---------------------------------------------------------------------
-    -- 2) Block aggregation from HOTELROOMBLOCKINVENTORY (MAX logic)
-    ---------------------------------------------------------------------
-    CREATE TABLE #BlkAgg
-    (
-        EMNNO INT,
-        HTNNO INT,
-        HBNNO INT PRIMARY KEY,
-
-        SubBlkSort VARCHAR(200) NULL,
-
-        BlockRequestedMax INT NULL,
-        BlockPickupMax    INT NULL,
-        BlockNotPickedUp  INT NULL,
-
-        BlockCanceledFlag VARCHAR(10) NULL,
-        RequestOrAdded    DATETIME NULL
-    );
-
-    INSERT INTO #BlkAgg
-    (
-        EMNNO, HTNNO, HBNNO, SubBlkSort,
-        BlockRequestedMax, BlockPickupMax, BlockNotPickedUp,
-        BlockCanceledFlag, RequestOrAdded
-    )
-    SELECT
-        e.EMNNO,
-        h.HTNNO,
-        hb.HBNNO,
-
-        CASE
-            WHEN ISNULL(LTRIM(RTRIM(hb.HBCACRO)),'') = ''
-                THEN ISNULL(CONVERT(VARCHAR(30), hb.HBCNO),'') + CONVERT(VARCHAR(20), hb.HBNNO)
-            ELSE ISNULL(hb.HBCACRO,'') + CONVERT(VARCHAR(20), hb.HBNNO)
-        END AS SubBlkSort,
-
-        MAX(
-            CASE
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
-                WHEN hb.HBDTXLD IS NOT NULL THEN 0
-                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0) + ISNULL(hbi.RBNADJUSTMENTS,0)
-            END
-        ) AS BlockRequestedMax,
-
-        MAX(
-            CASE
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
-                WHEN hb.HBDTXLD IS NOT NULL THEN 0
-                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0)
-                   + ISNULL(hbi.RBNADJUSTMENTS,0)
-                   - ISNULL(hbi.RBNREMAININGAVAILABLE,0)
-            END
-        ) AS BlockPickupMax,
-
-        MAX(
-            CASE
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
-                WHEN hb.HBDTXLD IS NOT NULL THEN 0
-                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0) + ISNULL(hbi.RBNADJUSTMENTS,0)
-            END
-        )
-        -
-        MAX(
-            CASE
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
-                WHEN hb.HBDTXLD IS NOT NULL THEN 0
-                ELSE ISNULL(hbi.RBNAMOUNTRESERVED,0)
-                   + ISNULL(hbi.RBNADJUSTMENTS,0)
-                   - ISNULL(hbi.RBNREMAININGAVAILABLE,0)
-            END
-        ) AS BlockNotPickedUp,
-
-        CASE
-            WHEN hb.HBDTXLD IS NULL THEN 'NotXld'
-            WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), hb.HBDTXLD, 121))) = '' THEN 'NotXld'
-            ELSE 'XLD'
-        END AS BlockCanceledFlag,
-
-        CASE
-            WHEN hb.HBDTREQUESTED IS NULL THEN hb.HBDTADD
-            ELSE hb.HBDTREQUESTED
-        END AS RequestOrAdded
-
-    FROM #Events ev
-    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO
-    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO
-    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
-    LEFT  JOIN dbo.HOTELROOMBLOCKINVENTORY hbi ON hbi.HBNNO = hb.HBNNO
-    GROUP BY
-        e.EMNNO, h.HTNNO, hb.HBNNO, hb.HBCACRO, hb.HBCNO,
-        hb.HBNAPPROVED, hb.HBDTXLD, hb.HBDTREQUESTED, hb.HBDTADD;
-
-    ---------------------------------------------------------------------
-    -- ✅ NEW: build DISTINCT room categories per Block (HBNNO)
-    -- This will be used for:
-    --   (a) single RCCACRO in Resultset 2
-    --   (b) distinct RCCACRO per HBNNO in Resultset 3
-    ---------------------------------------------------------------------
-    CREATE TABLE #BlkCat
-    (
-        HBNNO   INT NOT NULL,
-        RCNNO   INT NOT NULL,
-        RCCACRO VARCHAR(50) NULL,
-        CONSTRAINT PK_BlkCat PRIMARY KEY (HBNNO, RCNNO)
-    );
-
-    INSERT INTO #BlkCat(HBNNO, RCNNO, RCCACRO)
-    SELECT DISTINCT
-        ba.HBNNO,
-        rc.RCNNO,
-        rc.RCCACRO
-    FROM #BlkAgg ba
-    INNER JOIN dbo.HOTELROOMBLOCKINVENTORY hbi ON hbi.HBNNO = ba.HBNNO
-    INNER JOIN dbo.HOTELINVENTORY hi ON hi.HINNO = hbi.HINNO      -- ⚠️ if HINNO not exists, tell me correct column
-    INNER JOIN dbo.HOTELROOMCATEGORIES hrc ON hrc.HRNNO = hi.HRNNO
-    INNER JOIN dbo.ROOMCATEGORIES rc ON rc.RCNNO = hrc.RCNNO
-    WHERE ISNULL(LTRIM(RTRIM(rc.RCCACRO)),'') <> '';
-
-    ---------------------------------------------------------------------
-    -- RESULTSET 1: DsHeader (UNCHANGED SELECT LIST)
-    ---------------------------------------------------------------------
-    SELECT
-        e.EMNNO,
-        e.EMCNO,
-        e.EMCNM,
-        e.EMDTBEG,
-        e.EMDTEND,
-
-        EventDateSort = e.EMDTBEG,
-        EventSort     = ISNULL(e.EMCNM,'') + ISNULL(CONVERT(VARCHAR(20), e.EMCNO),''),
-
-        h.HTNNO,
-        h.HTCACRO,
-        h.HTCDSC,
-        h.HTDTCUTOFF,
-        h.HTCSLENM,
-        h.HTCSLETEL,
-        h.HTCSLEEMAIL,
-        h.HTCACCTYPE,
-
-        HotelSort = ISNULL(h.HTCDSC,'') + CONVERT(VARCHAR(20), h.HTNNO),
-
-        hb.HBNNO,
-        hb.HBCACRO,
-        hb.HBCNO,
-        hb.HBCORG,
-        hb.HBCFNM,
-        hb.HBCLNM,
-        hb.HBCTEL,
-        hb.HBDTSTART,
-        hb.HBNAPPROVED,
-        hb.HBDTXLD,
-        hb.HBDTAPPROVED,
-        hb.HBOVERWRITECUTOFFDATE,
-        hb.HBTEAMCUTOFFDATE,
-
-        ba.SubBlkSort,
-        ba.BlockCanceledFlag,
-        ba.RequestOrAdded,
-
-        HotelDepositAmount =
-            CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEPOSIT HOTEL' ELSE '' END
-
-    FROM #Events ev
-    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO
-    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO
-    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
-    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO
-    ORDER BY
-        e.EMDTBEG, ISNULL(e.EMCNM,''), e.EMCNO,
-        ISNULL(h.HTCDSC,''), h.HTNNO,
-        ba.SubBlkSort;
-
-    ---------------------------------------------------------------------
-    -- RESULTSET 2: DsMain (KEEP YOUR SELECT LIST SAME + ADD RCCACRO at END)
-    ---------------------------------------------------------------------
-    SELECT
-        e.EMNNO, e.EMCNO, e.EMCNM, e.EMDTBEG, e.EMDTEND,
-        EventDateSort = e.EMDTBEG,
-        EventSort     = ISNULL(e.EMCNM,'') + ISNULL(CONVERT(VARCHAR(20), e.EMCNO),''),
-
-        h.HTNNO, h.HTCACRO, h.HTCDSC, h.HTDTCUTOFF, h.HTCACCTYPE,
-        HotelSort = ISNULL(h.HTCDSC,'') + CONVERT(VARCHAR(20), h.HTNNO),
-
-        hb.HBNNO, hb.HBCACRO, hb.HBCNO, hb.HBCORG, hb.HBCFNM, hb.HBCLNM, hb.HBCTEL,
-        hb.HBNAPPROVED, hb.HBDTSTART, hb.HBDTREQUESTED, hb.HBDTADD, hb.HBDTXLD,
-        hb.HBDTAPPROVED, hb.HBOVERWRITECUTOFFDATE, hb.HBTEAMCUTOFFDATE,
-
-        ba.SubBlkSort,
-        ba.BlockCanceledFlag,
-        ba.RequestOrAdded,
-
-        r.RSNNO, r.RSDTARR, r.RSDTDEP, r.RSDTXLD,
-
-        Cancelled =
-            CASE
-                WHEN r.RSDTXLD IS NULL THEN ''
-                WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), r.RSDTXLD, 121))) = '' THEN ''
-                ELSE 'Xld'
-            END,
-
-        ResCount =
-            CASE
-                WHEN r.RSDTXLD IS NULL THEN 1
-                WHEN LTRIM(RTRIM(CONVERT(VARCHAR(30), r.RSDTXLD, 121))) = '' THEN 1
-                ELSE 0
-            END,
-
-        Nites =
-            CASE
-                WHEN ISNULL(hb.HBNAPPROVED,0) = 0 THEN 0
-                WHEN r.RSDTXLD IS NOT NULL THEN 0
-                ELSE DATEDIFF(DAY, CAST(r.RSDTARR AS DATE), CAST(r.RSDTDEP AS DATE))
-            END,
-
-        NameSort = CONVERT(VARCHAR(20), r.RSNNO) + CONVERT(VARCHAR(20), hb.HBNNO),
-
-        HotelDepositAmount =
-            CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEPOSIT HOTEL' ELSE '' END,
-
-        BlockRequestedMax = ISNULL(ba.BlockRequestedMax,0),
-        BlockPickupMax    = ISNULL(ba.BlockPickupMax,0),
-        BlockNotPickedUp  = ISNULL(ba.BlockNotPickedUp,0),
-
-        HotelRunMaxRequested =
-            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER
-            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
-
-        HotelRunMaxPickup =
-            SUM(ISNULL(ba.BlockPickupMax,0)) OVER
-            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
-
-        HotelNotPickedUp =
-            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER
-            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING)
-            -
-            SUM(ISNULL(ba.BlockPickupMax,0)) OVER
-            (PARTITION BY h.HTNNO ORDER BY ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
-
-        EventRunMaxRequested =
-            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER
-            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
-
-        EventRunMaxPickup =
-            SUM(ISNULL(ba.BlockPickupMax,0)) OVER
-            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
-
-        EventNotPickedUp =
-            SUM(ISNULL(ba.BlockRequestedMax,0)) OVER
-            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING)
-            -
-            SUM(ISNULL(ba.BlockPickupMax,0)) OVER
-            (PARTITION BY e.EMNNO ORDER BY h.HTNNO, ba.SubBlkSort ROWS UNBOUNDED PRECEDING),
-
-        -- ✅ ADDED AT END (single RCCACRO per HBNNO)
-        RCCACRO = CatPick.RCCACRO
-
-    FROM #Events ev
-    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO
-    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO
-    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
-    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO
-
-    -- pick ONE RCCACRO for the block (alphabetical). Change ORDER BY if you want different rule.
-    OUTER APPLY
-    (
-        SELECT TOP (1) bc.RCCACRO
-        FROM #BlkCat bc
-        WHERE bc.HBNNO = hb.HBNNO
-        ORDER BY bc.RCCACRO
-    ) CatPick
-
-    LEFT JOIN dbo.RESERVATIONS r
-        ON r.HBNNO = hb.HBNNO
-        AND CAST(r.RSDTARR AS DATE) <= @T
-        AND CAST(r.RSDTDEP AS DATE) >= @F
-    ORDER BY
-        e.EMDTBEG, ISNULL(e.EMCNM,''), e.EMCNO,
-        ISNULL(h.HTCDSC,''), h.HTNNO,
-        ba.SubBlkSort, r.RSNNO;
-
-
-
-
-		CREATE TABLE #MainCats
-(
-    EMNNO INT NOT NULL,
-    HTNNO INT NOT NULL,
-    RCNNO INT NOT NULL,
-    PRIMARY KEY (EMNNO, HTNNO, RCNNO)
-);
-
-INSERT INTO #MainCats (EMNNO, HTNNO, RCNNO)
-SELECT DISTINCT
-    e.EMNNO,
-    h.HTNNO,
-    hbi.RCNNO
-FROM #Events ev
-JOIN dbo.EVENTS e ON e.EMNNO = ev.EMNNO
-JOIN dbo.HOTEL h  ON h.EMNNO = e.EMNNO
-JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
-JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO
-JOIN dbo.HOTELROOMBLOCKINVENTORY hbi ON hbi.HBNNO = hb.HBNNO
-LEFT JOIN dbo.RESERVATIONS r
-    ON r.HBNNO = hb.HBNNO
-    AND CAST(r.RSDTARR AS DATE) <= @ToDate
-    AND CAST(r.RSDTDEP AS DATE) >= @FromDate
-WHERE
-    -- same “present in DsMain” logic: if you want only rows with reservations, uncomment next line
-    -- r.RSNNO IS NOT NULL
-    1 = 1;
-
-
-
-
-    ---------------------------------------------------------------------
-    -- RESULTSET 3: DsHotelRates (KEEP YOUR SELECT LIST SAME + ADD block keys at END)
-    -- DISTINCT RCCACRO per HBNNO comes from #BlkCat join (1 row per HBNNO+RCNNO)
-    ---------------------------------------------------------------------
-    SELECT DISTINCT
-        e.EMNNO,
-        h.HTNNO, h.HTCACRO, h.HTCDSC, h.HTCACCTYPE,
-        rc.RCCACRO, rc.RCNNO,
-        --hrtc.HCNCOST,
-        --hrtc.HCNDEPOSIT,
-        --RmsReserved = hi.HINAMOUNTRESERVED,
-
-		CostPick.HCNCOST,
-		CostPick.HCNDEPOSIT,
-		RmsReserved = CostPick.HINAMOUNTRESERVED,
-
-
-
-        DepositText = CASE WHEN h.HTCACCTYPE = 'DA' THEN 'DEP: ' ELSE '' END,
-        HotelRmCategory = ISNULL(rc.RCCACRO,'') + CONVERT(VARCHAR(20), rc.RCNNO),
-        HotelSort = ISNULL(h.HTCACRO,'') + CONVERT(VARCHAR(20), h.HTNNO),
-
-        -- ✅ ADDED AT END (for subreport link/filter)
-        hb.HBNNO,
-        hb.HBCACRO,
-        hb.HBCNO
-
-    FROM #Events ev
-    INNER JOIN dbo.EVENTS e  ON e.EMNNO = ev.EMNNO
-    INNER JOIN dbo.HOTEL h   ON h.EMNNO = e.EMNNO
-
-    -- ✅ bring block context
-    INNER JOIN dbo.HOTELROOMBLOCKS hb ON hb.HTNNO = h.HTNNO
-    INNER JOIN #BlkAgg ba ON ba.HBNNO = hb.HBNNO
-
-    -- ✅ distinct categories per block
-    INNER JOIN #BlkCat bc ON bc.HBNNO = hb.HBNNO
-
-    -- original joins (same tables as before) but now driven by block category
-    INNER JOIN dbo.HOTELROOMCATEGORIES hrc ON hrc.HTNNO = h.HTNNO AND hrc.RCNNO = bc.RCNNO
-    INNER JOIN dbo.ROOMCATEGORIES rc ON rc.RCNNO = hrc.RCNNO
-    --INNER JOIN dbo.HOTELINVENTORY hi ON hi.HRNNO = hrc.HRNNO
-    --INNER JOIN dbo.HOTELROOMTYPECOSTS hrtc ON hrtc.HINNO = hi.HINNO
-	OUTER APPLY
-(
-    SELECT TOP (1)
-        hrtc2.HCNCOST,
-        hrtc2.HCNDEPOSIT,
-        hi2.HINAMOUNTRESERVED
-    FROM dbo.HOTELINVENTORY hi2
-    INNER JOIN dbo.HOTELROOMTYPECOSTS hrtc2
-        ON hrtc2.HINNO = hi2.HINNO
-    WHERE hi2.HRNNO = hrc.HRNNO
-    ORDER BY hrtc2.HCNCOST DESC, hrtc2.HINNO DESC
-) CostPick
-
-    ORDER BY e.EMNNO, h.HTNNO, rc.RCCACRO, rc.RCNNO, hb.HBNNO;
-
-    DROP TABLE #BlkCat;
-    DROP TABLE #BlkAgg;
-    DROP TABLE #Events;
-END
+     private void RenderToHttp(string format, string contentType, string downloadName, string deviceInfo = null, bool forceDownloadForPdf = false)
+          {
+               TraceLog($"ENTER RenderToHttp | format={format} | name={downloadName}", stage: "ENTER");
+
+               // ✅ For long PDF runs
+               Server.ScriptTimeout = 3600;
+
+               Warning[] warnings;
+               string[] streams;
+               string mimeType, encoding, extension;
+
+               // helper: log to App_Data/logs/report_errors.txt
+               void LogLine(string stage, string message, Exception ex = null)
+               {
+                    try
+                    {
+                         string logDir = Server.MapPath("~/App_Data/logs");
+                         Directory.CreateDirectory(logDir);
+
+                         string logFile = Path.Combine(logDir, "report_errors.txt");
+
+                         var stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
+                         using (var sw = new StreamWriter(logFile, true))
+                         {
+                              sw.WriteLine("==== " + stamp + " ====");
+                              sw.WriteLine("Stage: " + stage);
+                              sw.WriteLine("Format: " + (format ?? ""));
+                              sw.WriteLine("DownloadName: " + (downloadName ?? ""));
+
+                              if (!string.IsNullOrWhiteSpace(message))
+                                   sw.WriteLine("Message: " + message);
+
+                              if (ex != null)
+                              {
+                                   sw.WriteLine("Exception: " + ex.GetType().FullName);
+                                   sw.WriteLine("Error: " + ex.Message);
+                                   sw.WriteLine("Stack: " + ex.StackTrace);
+                              }
+
+                              sw.WriteLine();
+                         }
+                    }
+                    catch { }
+               }
+
+               // Base filename
+               var safeName = string.IsNullOrWhiteSpace(downloadName) ? "Report" : downloadName.Trim();
+
+               // Determine "PDF mode" early
+               bool wantPdf =
+                   string.Equals(format ?? "", "PDF", StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(contentType ?? "", "application/pdf", StringComparison.OrdinalIgnoreCase) ||
+                   safeName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase);
+
+               // ============================================================
+               // ✅ FAST PATH: PDF => stream to disk (avoid giant byte[] in RAM)
+               // ============================================================
+
+               if (wantPdf)
+               {
+                    if (!safeName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                         safeName = Path.ChangeExtension(safeName, ".pdf");
+
+                    string tmpDir = Server.MapPath("~/App_Data/tmp");
+                    Directory.CreateDirectory(tmpDir);
+
+                    string baseName = "rpt_" + Guid.NewGuid().ToString("N");
+                    var streamFiles = new List<string>();
+
+                    try
+                    {
+                        // LogLine("RenderStart(PDF-Stream)", "Attempting LocalReport.Render(PDF) -> tmp streams");
+
+                         int streamIndex = 0;
+
+                         Stream CreateStream(string name, string ext, System.Text.Encoding enc, string mt, bool willSeek)
+                         {
+                              streamIndex++; // ✅ unique per call
+
+                              string safeExt = string.IsNullOrWhiteSpace(ext) ? "pdf" : ext.TrimStart('.');
+                              string safePart = string.IsNullOrWhiteSpace(name) ? "main" : name;
+
+                              string path = Path.Combine(tmpDir, $"{baseName}_{safePart}_{streamIndex:D3}.{safeExt}");
+                              streamFiles.Add(path);
+
+                              // Extra safe for scanners/locks
+                              for (int attempt = 1; attempt <= 5; attempt++)
+                              {
+                                   try
+                                   {
+                                        return new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+                                   }
+                                   catch (IOException)
+                                   {
+                                        if (attempt == 5) throw;
+                                        System.Threading.Thread.Sleep(80);
+                                   }
+                              }
+
+                              // will never hit
+                              return new FileStream(path, FileMode.Create, FileAccess.Write, FileShare.ReadWrite);
+                         }
+
+                         rv.LocalReport.Render("PDF", deviceInfo ?? string.Empty, CreateStream, out warnings);
+
+                         // pick the actual pdf stream file
+                         string pdfPath = streamFiles
+                                                 .Where(f => f.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                                                 .OrderByDescending(f => new FileInfo(f).Length)
+                                                 .FirstOrDefault()
+                                                 ?? streamFiles.FirstOrDefault();
+
+
+                         if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+                              throw new InvalidOperationException("PDF stream file not created by renderer.");
+
+                         //LogLine("RenderSuccess(PDF-Stream)", "PDF created: " + pdfPath + " | Size=" + new FileInfo(pdfPath).Length);
+
+                         // Optional cookie back to JS
+                         var token = Request.Form["dlToken"];
+                         if (!string.IsNullOrEmpty(token))
+                         {
+                              var cookie = new HttpCookie("fileDownloadToken", token) { Path = "/" };
+                              Response.Cookies.Add(cookie);
+                         }
+
+                         Response.Clear();
+                         Response.ClearHeaders();
+                         Response.BufferOutput = false;
+
+                         Response.ContentType = "application/pdf";
+                         Response.AddHeader("X-Content-Type-Options", "nosniff");
+
+                         string dispositionType = forceDownloadForPdf ? "attachment" : "inline";
+                         string headerFilename = safeName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase)
+                             ? safeName
+                             : safeName + ".pdf";
+
+                         Response.AddHeader("Content-Disposition",
+                             $"{dispositionType}; filename=\"{headerFilename}\"");
+
+                         // ✅ Send file by streaming with permissive share + retry
+                         const int BUF = 64 * 1024;
+
+                         for (int attempt = 1; attempt <= 40; attempt++)
+                         {
+                              try
+                              {
+                                   using (var fs = new FileStream(
+                                       pdfPath,
+                                       FileMode.Open,
+                                       FileAccess.Read,
+                                       FileShare.ReadWrite | FileShare.Delete,
+                                       BUF,
+                                       FileOptions.SequentialScan))
+                                   {
+                                        fs.CopyTo(Response.OutputStream, BUF);
+                                   }
+                                   break; // ✅ success
+                              }
+                              catch (IOException)
+                              {
+                                   if (attempt == 40) throw;      // last try -> bubble up
+                                   System.Threading.Thread.Sleep(125);
+                              }
+                         }
+
+                         Response.Flush();
+                         HttpContext.Current.ApplicationInstance?.CompleteRequest();
+                         return;
+
+
+                         //LogLine("SendSuccess(PDF-Stream)", "TransmitFile OK.");
+                         //HttpContext.Current.ApplicationInstance?.CompleteRequest();
+
+                         // ✅ NOTE: DO NOT delete here (TransmitFile may keep it locked).
+                         // Cleanup old tmp files separately (I'll give helper if you want).
+                         return;
+                    }
+                    catch (Exception ex)
+                    {
+                         Exception root = ex;
+                         while (root.InnerException != null) root = root.InnerException;
+
+                         LogLine("PDF-Stream-Fail", "Exception in PDF stream path.", root);
+
+                         Response.Clear();
+                         Response.TrySkipIisCustomErrors = true;
+                         Response.StatusCode = 500;
+                         Response.ContentType = "text/plain";
+                         Response.Write(root.Message);
+                         HttpContext.Current.ApplicationInstance?.CompleteRequest();
+                         return;
+                    }
+               }
+
+               // ============================================================
+               // Normal path: non-PDF => keep existing byte[] render approach
+               // ============================================================
+               byte[] bytes;
+
+               try
+               {
+                    LogLine("RenderStart", "Attempting LocalReport.Render(...)");
+
+                    bytes = rv.LocalReport.Render(
+                        format: string.IsNullOrWhiteSpace(format) ? "PDF" : format,
+                        deviceInfo: deviceInfo ?? string.Empty,
+                        mimeType: out mimeType,
+                        encoding: out encoding,
+                        fileNameExtension: out extension,
+                        streams: out streams,
+                        warnings: out warnings
+                    );
+
+                    LogLine("RenderSuccess", "Render complete. Bytes=" + (bytes?.Length ?? 0));
+               }
+               catch (Exception ex)
+               {
+                    Exception root = ex;
+                    while (root.InnerException != null) root = root.InnerException;
+
+                    LogLine("RenderFail", "Render threw.", root);
+
+                    Response.Clear();
+                    Response.TrySkipIisCustomErrors = true;
+                    Response.StatusCode = 500;
+                    Response.ContentType = "text/plain";
+                    Response.Write(root.Message);
+                    HttpContext.Current.ApplicationInstance?.CompleteRequest();
+                    return;
+               }
+
+               try
+               {
+                    var token = Request.Form["dlToken"];
+                    if (!string.IsNullOrEmpty(token))
+                    {
+                         var cookie = new HttpCookie("fileDownloadToken", token) { Path = "/" };
+                         Response.Cookies.Add(cookie);
+                    }
+
+                    if (string.IsNullOrEmpty(Path.GetExtension(safeName)) && !string.IsNullOrEmpty(extension))
+                         safeName += "." + extension.TrimStart('.');
+
+                    var effectiveMime = string.IsNullOrWhiteSpace(contentType) ? mimeType : contentType;
+
+                    Response.Clear();
+                    Response.TrySkipIisCustomErrors = true;
+                    Response.Buffer = true;
+                    Response.BufferOutput = true;
+
+                    Response.Cache.SetCacheability(HttpCacheability.NoCache);
+                    Response.Cache.SetNoStore();
+                    Response.Cache.SetExpires(DateTime.UtcNow.AddMinutes(-1));
+
+                    Response.ContentType = effectiveMime;
+
+                    // non-PDF always download
+                    Response.AddHeader(
+                        "Content-Disposition",
+                        $"attachment; filename=\"{safeName.Replace("\"", string.Empty)}\"; filename*=UTF-8''{Uri.EscapeDataString(safeName.Replace("\"", string.Empty))}"
+                    );
+
+                    Response.BinaryWrite(bytes);
+                    Response.Flush();
+
+                    LogLine("SendSuccess", "Bytes sent to client OK.");
+                    HttpContext.Current.ApplicationInstance?.CompleteRequest();
+               }
+               catch (Exception ex2)
+               {
+                    Exception root2 = ex2;
+                    while (root2.InnerException != null) root2 = root2.InnerException;
+
+                    LogLine("SendFail", "Failed while writing Response.", root2);
+
+                    Response.Clear();
+                    Response.TrySkipIisCustomErrors = true;
+                    Response.StatusCode = 500;
+                    Response.ContentType = "text/plain";
+                    Response.Write(root2.Message);
+                    HttpContext.Current.ApplicationInstance?.CompleteRequest();
+                    return;
+               }
+
+               TraceLog("EXIT RenderToHttp", stage: "EXIT");
+          }
+
+
+below method is from report.aspx.cs page
+
+<%@ Page Language="C#" AutoEventWireup="true" CodeBehind="Report.aspx.cs" Inherits="ReportRDLC.Report16.ReportRdlc" %>
+<%@ Register Assembly="Microsoft.ReportViewer.WebForms" Namespace="Microsoft.Reporting.WebForms" TagPrefix="rsweb" %>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head runat="server">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RDLC Report</title>
+<%--  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css" />
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>--%>
+	<script src="Content/js/gapis.js"></script>
+	<link href="Content/maxcdn1.css" rel="stylesheet" />
+	<script src="Content/js/maxcd1.js"></script>
+  <style>
+			.overlay{position:fixed;left:0;top:0;width:100%;height:100%;background:#808080;opacity:.8;z-index:9999;display:none}
+			
+			.container{
+				width:1300px !important;
+			}
+  </style>
+  <script>function Loader(s) { if (s) $("#busy").show(); else $("#busy").hide(); }</script>
+</head>
+<body>
+<form id="form1" runat="server" class="container classborder" style="margin-top:12px">
+<div id="busy" class="overlay">
+  <asp:Image ID="imgBusy" runat="server"
+             ImageUrl="~/Report16/Images/ProgressImage.gif"
+             AlternateText="Processing..."
+             Style="display:block;margin:20% auto 0;" />
+</div>
+
+  <!-- FILTERS (shown only when ?Filter=... is present) -->
+  <asp:Panel ID="pnlFilters" runat="server" Visible="false" CssClass="panel panel-default">
+    <div class="panel-heading" style="font-size:25px;color:#336699;"><b><u>Optional Report Choices</u></b></div>
+    <div class="panel-body form-horizontal">
+      <asp:Literal ID="ltrParams" runat="server" />
+      <div class="form-group">
+        <div class="col-sm-12 btncontinue">
+       <asp:Button ID="btnContinue" runat="server" Text="Continue" CssClass="btn btn-primary"
+    OnClick="btnContinue_Click"
+    OnClientClick="return startDownload();" />
+
+
+        </div>
+      </div>
+    </div>
+  </asp:Panel>
+
+  <!-- Optional in-page preview when V is not P/E -->
+  <asp:Panel ID="pnlViewer" runat="server" Visible="false">
+    <rsweb:ReportViewer ID="rv" runat="server"
+      AsyncRendering="false" SizeToReportContent="true"
+      Width="100%" Height="900px" />
+  </asp:Panel>
+
+   <iframe id="downloadFrame" name="downloadFrame" style="display:none"></iframe>
+<input type="hidden" id="dlToken" name="dlToken" />
+</form>
+
+     <script>
+		var dlPoll = null;
+
+		function clearLoader() {
+			Loader(false);
+			if (dlPoll) { clearInterval(dlPoll); dlPoll = null; }
+		}
+
+		function startDownload() {
+			// Only do the special flow when exporting a file
+			var v = (new URLSearchParams(location.search)).get('V') || '';
+			var isFile = (v.toUpperCase() === 'E' || v.toUpperCase() === 'P');
+
+
+
+			if (!isFile) {
+				Loader(true);                // normal postback (in-page preview)
+				return true;
+			}
+
+			// Unique token for this download
+			var token = Date.now().toString();
+			document.getElementById('dlToken').value = token;
+
+			// Remove any old cookie
+			document.cookie = 'fileDownloadToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+
+			// Post to a hidden iframe so the page doesn't navigate
+			var form = document.getElementById('<%= form1.ClientID %>');
+			form.setAttribute('target', 'downloadFrame');
+
+			Loader(true);
+
+			// Poll for the server-set cookie that signals download complete
+			dlPoll = setInterval(function () {
+				if (document.cookie.indexOf('fileDownloadToken=' + token) !== -1) {
+					clearLoader();
+					form.removeAttribute('target');
+					// Clean cookie
+					document.cookie = 'fileDownloadToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+				}
+			}, 400);
+
+			// Safety timeout (e.g., network error)
+			setTimeout(function () {
+				clearLoader();
+				form.removeAttribute('target');
+			}, 120000); // 2 minutes
+
+			return true; // allow postback
+		}
+
+		// Extra safety: if the page navigates away for any reason
+		window.addEventListener('pagehide', clearLoader);
+	</script>
+
+
+
+
+</body>
+    
+
+</html>
+
+now this is my report.aspx pagenow when my request has been completed my loader is hiding
+can you correct this?
+and remember dont change anything else working
