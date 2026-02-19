@@ -1,11 +1,81 @@
-
-EVENTS.EMCNM
-{EMDTBEG} - {EMDTEND}
-HOTELROOMBLOCKS.HBDTAPPROVED
-HOTELROOMBLOCKS.HBCORG
-{HBCFNM} {HBCLNM}
-HOTELROOMBLOCKS.HBCEMAIL
-HOTEL.HTCDSC
-#RunPeakNight (@Sum of BlkReq+Adj)
-
-i need only  these columns in my select so it will bind fast reow and gpt all the grouping calculation formatting everything do it in sp
+ALTER   PROCEDURE dbo.sp_ICM_RPT_UnfulfilledRoomBlockRequests_RDLC      
+(      
+    @EMNNO        INT  = NULL,   -- optional filter      
+    @BegDateFrom  DATE = NULL,   -- optional      
+    @BegDateTo    DATE = NULL    -- optional      
+)      
+AS      
+BEGIN      
+    SET NOCOUNT ON;      
+      
+    SELECT      
+        E.EMDTBEG,      
+        E.EMCNM,      
+        E.EMDTEND,      
+        E.EMCREGISTRARNAME,      
+      
+        HRB.HBCORG,      
+        HRB.HBCFNM,      
+        HRB.HBCLNM,      
+        HRB.HBCTEL,      
+        HRB.HBCMOBILE,      
+      
+        H.HTCDSC,      
+      
+        HRB.HBDTSTART,      
+        HRB.HBDTEND,      
+      
+        HRBI.RBNAMOUNTREQUESTED,      
+        HRB.HBNNO,      
+        HRB.HBDTREQUESTED,      
+        HRB.HBNAPPROVED,      
+      
+        E.EMNNO,      
+        E.EMCVIPDSC1,      
+      
+        HRB.HBCAGEGROUP,      
+      
+        HRBI.HINNO,      
+        HRBI.RBDATE,      
+      
+        HRB.HBCINTERNALNOTES,      
+      
+        -- =========================      
+        -- Crystal Formula Fields      
+        -- =========================      
+        BlkSort       = HRB.HBNNO,      
+        EventDateSort = E.EMDTBEG,      
+        EventSort     = DATEADD(DAY, ISNULL(E.EMNNO,0), CAST(E.EMDTBEG AS DATETIME))      
+      
+    FROM ICM.dbo.EVENTS E      
+    INNER JOIN ICM.dbo.HOTEL H      
+        ON E.EMNNO = H.EMNNO      
+    INNER JOIN ICM.dbo.HOTELROOMBLOCKS HRB      
+        ON H.HTNNO = HRB.HTNNO      
+    LEFT JOIN ICM.dbo.HOTELROOMBLOCKINVENTORY HRBI      
+        ON HRB.HBNNO = HRBI.HBNNO      
+      
+    WHERE      
+        -- Optional params (existing)      
+        --(@EMNNO IS NULL OR E.EMNNO = @EMNNO)      
+        --AND (@BegDateFrom IS NULL OR CAST(E.EMDTBEG AS DATE) >= @BegDateFrom)      
+        --AND (@BegDateTo   IS NULL OR CAST(E.EMDTBEG AS DATE) <= @BegDateTo)      
+      
+        -- =========================      
+        -- Crystal Record Selection (ADDED)      
+        -- =========================      
+         HRB.HBNAPPROVED <> 1      
+        AND HRB.HBDTXLD IS NULL      
+        AND HRB.HBDTINACTIVE IS NULL      
+        AND CAST(E.EMDTBEG AS DATE) >= CAST(GETDATE() AS DATE) 
+		--AND HRB.HBDTREQUESTED IS NOT NULL
+      
+    ORDER BY      
+        E.EMDTBEG,      
+        DATEADD(DAY, ISNULL(E.EMNNO,0), CAST(E.EMDTBEG AS DATETIME)),      
+        HRB.HBNNO,      
+        CASE WHEN HRBI.RBDATE IS NULL THEN 1 ELSE 0 END,      
+        HRBI.RBDATE,      
+        CASE WHEN HRBI.HINNO IS NULL THEN 1 ELSE 0 END,      
+        HRBI.HINNO;      
+END;      
