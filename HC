@@ -1,1 +1,9 @@
-=Fields!RGCPLNM.Value+Fields!RGCPFNM.Value+cstr(Fields!RSNNO.Value)
+EventDate
+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventBegDate}
+
+
+EventNameSort
+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventName}+totext({sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EMNNO})
+
+GroupBlock
+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventName}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.TeamName}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.TeamManager}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.BlockCode}
