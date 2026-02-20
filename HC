@@ -1,20 +1,174 @@
-SELECT distinct   
-        HOTEL.HTNNO,  
-  ROOMCATEGORIES.RCCACRO,  
-  'Peak Night Inv: ' +'  '+ISNULL(convert(nvarchar(10),hi.HINAMOUNTRESERVED),0) as HINAMOUNTRESERVED  
-  ,ROOMCATEGORIES.RCCACRO + ': ' + CAST(CAST(MAX(hrtc.HCNCOST) AS DECIMAL(18,2)) AS NVARCHAR(20)) AS HCNCOST  
-  
+
+CRYSTAL generated sql
+
+ SELECT "EVENTS"."EMNNO", "HOTELROOMBLOCKS"."HBCORG", "HOTELROOMBLOCKS"."HBCFNM", "HOTELROOMBLOCKS"."HBCLNM", "HOTELROOMBLOCKS"."HBCEMAIL", "HOTEL"."HTCDSC", "HOTELROOMBLOCKINVENTORY"."RBNAMOUNTRESERVED", "EVENTS"."EMCNM", "EVENTS"."EMDTBEG", "EVENTS"."EMDTEND", "HOTELROOMBLOCKS"."HBDTAPPROVED", "HOTEL"."HTNNO", "HOTELROOMBLOCKINVENTORY"."RBDATE", "HOTELROOMBLOCKS"."HBNNO", "HOTELROOMBLOCKINVENTORY"."RBNADJUSTMENTS"
+ FROM   (("ICM"."dbo"."EVENTS" "EVENTS" INNER JOIN "ICM"."dbo"."HOTEL" "HOTEL" ON "EVENTS"."EMNNO"="HOTEL"."EMNNO") INNER JOIN "ICM"."dbo"."HOTELROOMBLOCKS" "HOTELROOMBLOCKS" ON "HOTEL"."HTNNO"="HOTELROOMBLOCKS"."HTNNO") INNER JOIN "ICM"."dbo"."HOTELROOMBLOCKINVENTORY" "HOTELROOMBLOCKINVENTORY" ON "HOTELROOMBLOCKS"."HBNNO"="HOTELROOMBLOCKINVENTORY"."HBNNO"
+ WHERE  "EVENTS"."EMNNO"=0
+ ORDER BY "EVENTS"."EMNNO
+
+BlkReq+Adj
+{HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED}+{HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS}
+
+
+
+SortOrder-BlkNameNo
+{HOTELROOMBLOCKS.HBCORG}+{HOTELROOMBLOCKS.HBCLNM}+{HOTELROOMBLOCKS.HBCFNM}+totext({HOTEL.HTNNO})
+
+
+SpecialHides
+if uppercase ({HOTELROOMBLOCKS.HBCFNM})='IND' and uppercase ({HOTELROOMBLOCKS.HBCLNM})='RESERVATIONS' then
+     0
+else if uppercase ({HOTELROOMBLOCKS.HBCFNM})='JOHN' and uppercase ({HOTELROOMBLOCKS.HBCLNM})='BILLINGSLEY' then
+    0
+else if uppercase ({HOTELROOMBLOCKS.HBCFNM})='TOURNAMENT' and uppercase ({HOTELROOMBLOCKS.HBCLNM})='COMP' then
+    0
+else 1
+
+
+
+EVENTS.EMCNM
+{EMDTBEG} - {EMDTEND}
+HOTELROOMBLOCKS.HBDTAPPROVED
+HOTELROOMBLOCKS.HBCORG
+{HBCFNM} {HBCLNM}
+HOTELROOMBLOCKS.HBCEMAIL
+HOTEL.HTCDSC
+#RunPeakNight (@Sum of BlkReq+Adj)
+
+
+
+
+EMCNM	
+EventDateRange	
+HBDTAPPROVED	
+HBCORG	
+BlockTeamName	
+HBCEMAIL	
+HTCDSC	
+RunPeakNight
+
+
+
+EventDate
+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventBegDate}
+
+
+EventNameSort
+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventName}+totext({sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EMNNO})
+
+GroupBlock
+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventName}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.TeamName}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.TeamManager}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.BlockCode}
+
+
+
+RDLC SP
+
+CREATE   PROCEDURE dbo.sp_ICM_RPT_BlkInventory_ByEvent_RDLC    
+(    
+    @EMNNO INT,    
+    @ExcludeSpecial BIT = 1   -- keep default ON to match Crystal "exclude" note    
+ -- EXEC sp_ICM_RPT_BlkInventory_ByEvent_RDLC 19590    
+)    
+AS    
+BEGIN    
+    SET NOCOUNT ON;    
+    SET XACT_ABORT ON;    
+    SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;    
     
- FROM HOTEL     
-         JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO     
-         JOIN EVENTS ON HOTEL.EMNNO=EVENTS.EMNNO     
-         JOIN ROOMCATEGORIES ON HOTELROOMBLOCKS.RCNNO=ROOMCATEGORIES.RCNNO  
-   Join HOTELROOMCATEGORIES hrc on hrc.HTNNO=HOTEL.HTNNO    
-   Join HOTELINVENTORY hi on hi.HRNNO =hrc.HRNNO  
-   Join HOTELROOMTYPECOSTS hrtc on hrtc.HINNO = hi.HINNO  
-WHERE     
-        EVENTS.EMNNO = @EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1 
-		AND hi.HINAMOUNTRESERVED > 0
-  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'    
-  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'    
-  group by hotel.HTNNO,HOTEL.HTCDSC,ROOMCATEGORIES.RCCACRO,ROOMCATEGORIES.RCNNO,hi.HINAMOUNTRESERVED
+    ----------------------------------------------------------------------    
+    -- 1) Block headers (small rowset) - 1 row per HBNNO    
+    ----------------------------------------------------------------------    
+    CREATE TABLE #Blocks    
+    (    
+        HBNNO        INT           NOT NULL PRIMARY KEY,    
+        EMCNM        VARCHAR(200)  NULL,    
+        EMDTBEG      DATETIME      NULL,    
+        EMDTEND      DATETIME      NULL,    
+        HBDTAPPROVED DATETIME      NULL,    
+        HBCORG       VARCHAR(200)  NULL,    
+        HBCFNM       VARCHAR(200)  NULL,    
+        HBCLNM       VARCHAR(200)  NULL,    
+        HBCEMAIL     VARCHAR(300)  NULL,    
+        HTCDSC       VARCHAR(300)  NULL    
+    );    
+    
+    INSERT INTO #Blocks (HBNNO, EMCNM, EMDTBEG, EMDTEND, HBDTAPPROVED, HBCORG, HBCFNM, HBCLNM, HBCEMAIL, HTCDSC)    
+    SELECT DISTINCT    
+          HRB.HBNNO    
+        , E.EMCNM    
+        , E.EMDTBEG    
+        , E.EMDTEND    
+        , HRB.HBDTAPPROVED    
+        , HRB.HBCORG    
+        , HRB.HBCFNM    
+        , HRB.HBCLNM    
+        , HRB.HBCEMAIL    
+        , H.HTCDSC    
+    FROM dbo.EVENTS E    
+    INNER JOIN dbo.HOTEL H    
+        ON H.EMNNO = E.EMNNO    
+    INNER JOIN dbo.HOTELROOMBLOCKS HRB    
+        ON HRB.HTNNO = H.HTNNO    
+    WHERE    
+        E.EMNNO = @EMNNO    
+        AND     
+  (    
+              @ExcludeSpecial = 0    
+              OR NOT (    
+                    (UPPER(LTRIM(RTRIM(ISNULL(HRB.HBCFNM,'')))) = 'IND'        AND UPPER(LTRIM(RTRIM(ISNULL(HRB.HBCLNM,'')))) = 'RESERVATIONS')    
+                 OR (UPPER(LTRIM(RTRIM(ISNULL(HRB.HBCFNM,'')))) = 'JOHN'       AND UPPER(LTRIM(RTRIM(ISNULL(HRB.HBCLNM,'')))) = 'BILLINGSLEY')    
+                 OR (UPPER(LTRIM(RTRIM(ISNULL(HRB.HBCFNM,'')))) = 'TOURNAMENT' AND UPPER(LTRIM(RTRIM(ISNULL(HRB.HBCLNM,'')))) = 'COMP')    
+              )    
+        );    
+    
+    ----------------------------------------------------------------------    
+    -- 2) Aggregate inventory ONLY for selected blocks (RunPeakNight = SUM)    
+    ----------------------------------------------------------------------    
+    CREATE TABLE #Agg    
+    (    
+        HBNNO        INT NOT NULL PRIMARY KEY,    
+        RunPeakNight DECIMAL(18,2) NOT NULL    
+    );    
+    
+    INSERT INTO #Agg (HBNNO, RunPeakNight)    
+    SELECT    
+          I.HBNNO    
+        , SUM(CAST(ISNULL(I.RBNAMOUNTRESERVED,0) AS DECIMAL(18,2)) + CAST(ISNULL(I.RBNADJUSTMENTS,0) AS DECIMAL(18,2))) AS RunPeakNight    
+    FROM dbo.HOTELROOMBLOCKINVENTORY I    
+    INNER JOIN #Blocks B    
+        ON B.HBNNO = I.HBNNO    
+    GROUP BY    
+        I.HBNNO;    
+    
+    ----------------------------------------------------------------------    
+    -- 3) Final output (ONLY the required columns + formatted date range)    
+    ----------------------------------------------------------------------    
+    SELECT    
+          B.EMCNM    
+        , (CONVERT(VARCHAR(10), CAST(B.EMDTBEG AS DATE), 101) + ' - ' +    
+           CONVERT(VARCHAR(10), CAST(B.EMDTEND AS DATE), 101)) AS EventDateRange    
+        , B.HBDTAPPROVED    
+        , B.HBCORG    
+        , (LTRIM(RTRIM(ISNULL(B.HBCFNM,''))) +    
+           CASE WHEN ISNULL(LTRIM(RTRIM(B.HBCFNM)),'') <> '' AND ISNULL(LTRIM(RTRIM(B.HBCLNM)),'') <> '' THEN ' ' ELSE '' END +    
+           LTRIM(RTRIM(ISNULL(B.HBCLNM,'')))) AS BlockTeamName    
+        , B.HBCEMAIL    
+        , B.HTCDSC    
+        , ISNULL(A.RunPeakNight, 0) AS RunPeakNight    
+    FROM #Blocks B    
+    LEFT JOIN #Agg A    
+        ON A.HBNNO = B.HBNNO    
+    ORDER BY    
+          ISNULL(B.HBDTAPPROVED, '19000101')    
+        , ISNULL(B.HBCORG,'')    
+        , (LTRIM(RTRIM(ISNULL(B.HBCFNM,''))) +    
+           CASE WHEN ISNULL(LTRIM(RTRIM(B.HBCFNM)),'') <> '' AND ISNULL(LTRIM(RTRIM(B.HBCLNM)),'') <> '' THEN ' ' ELSE '' END +    
+           LTRIM(RTRIM(ISNULL(B.HBCLNM,''))))    
+        , B.HTCDSC;    
+END 
+
+
+now gpt in my sp RunPeakNight calculation not correct like crystal
+and order is not same like crytsal
+
+So you need to handle my sp according to crytsal report data.
