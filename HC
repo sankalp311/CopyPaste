@@ -1,9 +1,20 @@
-EventDate
-{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventBegDate}
-
-
-EventNameSort
-{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventName}+totext({sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EMNNO})
-
-GroupBlock
-{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.EventName}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.TeamName}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.TeamManager}+{sp_icm_rpt_RoomBlock_Max_Inventory_with_SpclBlks;1.BlockCode}
+SELECT distinct   
+        HOTEL.HTNNO,  
+  ROOMCATEGORIES.RCCACRO,  
+  'Peak Night Inv: ' +'  '+ISNULL(convert(nvarchar(10),hi.HINAMOUNTRESERVED),0) as HINAMOUNTRESERVED  
+  ,ROOMCATEGORIES.RCCACRO + ': ' + CAST(CAST(MAX(hrtc.HCNCOST) AS DECIMAL(18,2)) AS NVARCHAR(20)) AS HCNCOST  
+  
+    
+ FROM HOTEL     
+         JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO     
+         JOIN EVENTS ON HOTEL.EMNNO=EVENTS.EMNNO     
+         JOIN ROOMCATEGORIES ON HOTELROOMBLOCKS.RCNNO=ROOMCATEGORIES.RCNNO  
+   Join HOTELROOMCATEGORIES hrc on hrc.HTNNO=HOTEL.HTNNO    
+   Join HOTELINVENTORY hi on hi.HRNNO =hrc.HRNNO  
+   Join HOTELROOMTYPECOSTS hrtc on hrtc.HINNO = hi.HINNO  
+WHERE     
+        EVENTS.EMNNO = @EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1 
+		AND hi.HINAMOUNTRESERVED > 0
+  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'    
+  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'    
+  group by hotel.HTNNO,HOTEL.HTCDSC,ROOMCATEGORIES.RCCACRO,ROOMCATEGORIES.RCNNO,hi.HINAMOUNTRESERVED
