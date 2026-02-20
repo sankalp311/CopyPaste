@@ -23,3 +23,255 @@ if {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.HBNAPPROVED}=0 then
     0
 else {sp_ICM_RPT_Inventory_Events_Block_Rollup_NoParams;1.Block_Max_Pickups}
 
+
+
+
+ALTER PROCEDURE sp_ICM_RPT_TTBlkDetailRes_NoParams    
+@EMNNO int      
+/*    
+Created by : Vipin    
+Created On : 06-02-2026    
+Description : Get report data for TT-BlkDetailRes   
+EXEC sp_ICM_RPT_TTBlkDetailRes_NoParams 12774  
+*/    
+As      
+BEGIN    
+Set NoCount On       
+SET ANSI_WARNINGS OFF       
+    
+ ---Table 0 Main Datset    
+SELECT       
+        EVENTS.EMNNO,       
+        EVENTS.EMCACRO,      
+        EVENTS.EMCPRO,      
+        HOTELROOMBLOCKS.HBNNO,       
+        HOTELROOMBLOCKS.HBCACRO,       
+        ROOMCATEGORIES.RCCDESC,       
+        HOTELROOMBLOCKS.HBCNO,       
+        HOTELROOMBLOCKS.HBCORG,       
+        HOTELROOMBLOCKS.HBCFNM,       
+        HOTELROOMBLOCKS.HBCLNM,       
+        HOTELROOMBLOCKS.HBCTEL,       
+        HOTELROOMBLOCKS.HBDTSTART,      
+        HOTELROOMBLOCKS.HBDTXLD,         
+        ROOMCATEGORIES.RCCACRO,       
+        HOTEL.HTNNO,       
+        EVENTS.EMDTBEG,       
+        EVENTS.EMDTEND,       
+        EVENTS.EMCNM,       
+        HOTEL.HTCDSC,       
+        HOTELROOMBLOCKS.HBNAPPROVED,       
+        HOTELROOMBLOCKS.HTNNO,       
+  convert(nvarchar(10),HOTELROOMBLOCKS.HBDTAPPROVED,101) as HBDTAPPROVED,      
+        HOTEL.EMNNO,       
+        RESERVATIONS.RSNNO,      
+        convert(nvarchar(10),RESERVATIONS.RSDTARR,101) as RSDTARR,      
+        convert(nvarchar(10),RESERVATIONS.RSDTDEP, 101) as RSDTDEP,    
+        convert(nvarchar(10),RESERVATIONS.RSDTXLD,101)as RSDTXLD,      
+        REGMST.RGNNO,      
+        REGMST.RGCNO,      
+        REGMST.RGCPLNM,      
+        REGMST.RGCPFNM,      
+        REGMST.RGCPCITY,      
+        REGMST.RGCPST,      
+        REGMST.RGCEMAIL,      
+        isnull(BLOCK_INVENTORY.Block_Amount_Reserved,0) Block_Total_Amount_Reserved,       
+        isnull(BLOCK_INVENTORY.Block_Remaining_Available,0) Block_Total_Remaining_Available,       
+        isnull(BLOCK_INVENTORY.Block_Adjustments,0) Block_Total_Adjustments,       
+        isnull(BLOCK_INVENTORY.Max_Reserved,0) Block_Max_Reserved,       
+        isnull(BLOCK_INVENTORY.Max_Requested,0) Block_Max_Requested,       
+        isnull(sum(BLOCK_PICKUPS.Block_Pickups),0) Block_Total_Pickups,       
+        isnull(max(BLOCK_PICKUPS.Block_Pickups),0) Block_Max_Pickups,       
+  isnull(max(BLOCK_INVENTORY.BLOCK_RESERVED_ADJUSTED),0) BLOCK_RESERVED_ADJUSTED,    
+  SUM(CASE WHEN HBNAPPROVED = 0 THEN 0 ELSE BLOCK_INVENTORY.BLOCK_RESERVED_ADJUSTED  END) AS Total_BLOCK_RESERVED_ADJUSTED    
+ FROM         
+        HOTEL       
+        LEFT OUTER JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO       
+        LEFT OUTER JOIN RESERVATIONS ON HOTELROOMBLOCKS.HBNNO=RESERVATIONS.HBNNO      
+        LEFT OUTER JOIN REGMST on REGMST.RGNNO=RESERVATIONS.RGNNO      
+        LEFT OUTER JOIN EVENTS ON HOTEL.EMNNO=EVENTS.EMNNO       
+        LEFT OUTER JOIN ROOMCATEGORIES ON HOTELROOMBLOCKS.RCNNO=ROOMCATEGORIES.RCNNO       
+        LEFT OUTER JOIN (       
+                SELECT       
+                        EVENTS.EMNNO,       
+                        HOTELROOMBLOCKS.HBNNO,       
+                        max(RBNAMOUNTREQUESTED) Max_Requested,        
+                        max(RBNAMOUNTRESERVED) Max_Reserved,       
+                        sum(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED) Block_Amount_Reserved,       
+                        sum(HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE) Block_Remaining_Available,       
+                        sum(HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS) Block_Adjustments,       
+      max(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + HOTELROOMBLOCKINVENTORY.RBNADJUSTMENTS) BLOCK_RESERVED_ADJUSTED      
+                FROM       
+                        (((       
+                        EVENTS INNER       
+                        JOIN HOTEL ON EVENTS.EMNNO=HOTEL.EMNNO) INNER       
+                        JOIN HOTELROOMBLOCKS  ON       
+                        HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO) INNER JOIN       
+                        HOTELROOMBLOCKINVENTORY ON       
+                        HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO)       
+                WHERE       
+                        EVENTS.EMNNO=@EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
+      And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'CompTournament'      
+      And HOTELROOMBLOCKS.HBCLNM+HOTELROOMBLOCKS.HBCFNM<>'BillingsleyJohn'       
+                GROUP BY       
+                        EVENTS.EMNNO,      
+                        EVENTS.EMCACRO,      
+                        EVENTS.EMCPRO,      
+                        HOTELROOMBLOCKS.HBNNO      
+        ) BLOCK_INVENTORY ON EVENTS.EMNNO = BLOCK_INVENTORY.EMNNO       
+        and HOTELROOMBLOCKS.HBNNO = BLOCK_INVENTORY.HBNNO       
+        LEFT OUTER JOIN (       
+                SELECT       
+                        EVENTS.EMNNO,       
+                        RESERVATIONS.HBNNO,       
+                        RESNIGHTS.HINNO,       
+                        count(RESNIGHTS.RSNNO) Block_Pickups       
+                FROM       
+                        (((EVENTS INNER       
+                        JOIN REGMST ON EVENTS.EMNNO=REGMST.EMNNO) INNER       
+                        JOIN RESERVATIONS ON       
+                        REGMST.RGNNO=RESERVATIONS.RGNNO       
+                                AND RESERVATIONS.RSDTXLD is NULL       
+                                AND NOT RESERVATIONS.HBNNO is NULL) INNER JOIN       
+                        RESNIGHTS ON       
+                        RESERVATIONS.RSNNO=RESNIGHTS.RSNNO)       
+                WHERE       
+                        EVENTS.EMNNO=@EMNNO       
+                GROUP BY       
+                        EVENTS.EMNNO,      
+                        EVENTS.EMCACRO,      
+                        EVENTS.EMCPRO,      
+                        RESERVATIONS.HBNNO,       
+                        RESNIGHTS.HINNO       
+        ) BLOCK_PICKUPS ON EVENTS.EMNNO = BLOCK_PICKUPS.EMNNO       
+                and HOTELROOMBLOCKS.HBNNO = BLOCK_PICKUPS.HBNNO       
+WHERE       
+        EVENTS.EMNNO = @EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1      
+  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'      
+  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'       
+GROUP BY       
+        EVENTS.EMNNO,       
+        EVENTS.EMCACRO,      
+        EVENTS.EMCPRO,      
+        HOTELROOMBLOCKS.HBNNO,       
+        HOTELROOMBLOCKS.HBCACRO,       
+        ROOMCATEGORIES.RCCDESC,       
+        HOTELROOMBLOCKS.HBCNO,       
+        HOTELROOMBLOCKS.HBCORG,       
+        HOTELROOMBLOCKS.HBCFNM,       
+        HOTELROOMBLOCKS.HBCLNM,       
+        HOTELROOMBLOCKS.HBCTEL,       
+        HOTELROOMBLOCKS.HBDTSTART,       
+        ROOMCATEGORIES.RCCACRO,       
+        HOTEL.HTNNO,       
+        EVENTS.EMDTBEG,       
+        EVENTS.EMDTEND,       
+        EVENTS.EMCNM,       
+        HOTEL.HTCDSC,       
+        HOTELROOMBLOCKS.HBNAPPROVED,       
+        HOTELROOMBLOCKS.HBDTXLD,      
+        HOTELROOMBLOCKS.HTNNO,      
+  HOTELROOMBLOCKS.HBDTAPPROVED,       
+        HOTEL.EMNNO,       
+        isnull(BLOCK_INVENTORY.Block_Amount_Reserved,0),       
+        isnull(BLOCK_INVENTORY.Block_Remaining_Available,0),       
+        isnull(BLOCK_INVENTORY.Block_Adjustments,0),       
+        isnull(BLOCK_INVENTORY.Max_Reserved,0),       
+        isnull(BLOCK_INVENTORY.Max_Requested,0),      
+  RESERVATIONS.RSNNO,      
+  RESERVATIONS.RSDTARR,      
+        RESERVATIONS.RSDTDEP,      
+        RESERVATIONS.RSDTXLD,      
+        REGMST.RGNNO,      
+        REGMST.RGCNO,      
+        REGMST.RGCPLNM,      
+        REGMST.RGCPFNM,      
+        REGMST.RGCPCITY,      
+        REGMST.RGCPST,      
+        REGMST.RGCEMAIL      
+ Order by CASE     
+    WHEN ISNULL(HBCACRO, '') = ''     
+        THEN CAST(HBCNO AS NVARCHAR(50)) + CAST(HOTELROOMBLOCKS.HBNNO AS NVARCHAR(50))    
+    ELSE     
+        HBCACRO + CAST(HOTELROOMBLOCKS.HBNNO AS NVARCHAR(50))    
+END    
+    
+    
+    
+-----Table 1 Subreport Dataset    
+--SELECT distinct     
+--        HOTEL.HTNNO,    
+--  ROOMCATEGORIES.RCCACRO,    
+--  'Peak Night Inv: ' +'  '+ISNULL(convert(nvarchar(10),hi.HINAMOUNTRESERVED),0) as HINAMOUNTRESERVED    
+--  ,ROOMCATEGORIES.RCCACRO + ': ' + CAST(CAST(MAX(hrtc.HCNCOST) AS DECIMAL(18,2)) AS NVARCHAR(20)) AS HCNCOST    
+    
+      
+-- FROM HOTEL       
+--         JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO       
+--         JOIN EVENTS ON HOTEL.EMNNO=EVENTS.EMNNO       
+--         JOIN ROOMCATEGORIES ON HOTELROOMBLOCKS.RCNNO=ROOMCATEGORIES.RCNNO    
+--   Join HOTELROOMCATEGORIES hrc on hrc.HTNNO=HOTEL.HTNNO      
+--   Join HOTELINVENTORY hi on hi.HRNNO =hrc.HRNNO    
+--   Join HOTELROOMTYPECOSTS hrtc on hrtc.HINNO = hi.HINNO    
+--WHERE       
+--        EVENTS.EMNNO = @EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1   
+--  AND hi.HINAMOUNTRESERVED > 0  
+--  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'      
+--  And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'      
+--  group by hotel.HTNNO,HOTEL.HTCDSC,ROOMCATEGORIES.RCCACRO,ROOMCATEGORIES.RCNNO,hi.HINAMOUNTRESERVED  
+  
+SELECT  
+      h.HTNNO,  
+      rc.RCCACRO,  
+  
+      'Peak Night Inv:  ' + CONVERT(nvarchar(10), ISNULL(MAX(hi.HINAMOUNTRESERVED), 0)) AS HINAMOUNTRESERVED,  
+  
+      rc.RCCACRO + ': ' + CONVERT(nvarchar(20), CAST(MAX(hrtc.HCNCOST) AS decimal(18,2))) AS HCNCOST  
+  
+FROM HOTEL h  
+JOIN HOTELROOMBLOCKS hrb  
+    ON h.HTNNO = hrb.HTNNO  
+JOIN EVENTS e  
+    ON h.EMNNO = e.EMNNO  
+JOIN ROOMCATEGORIES rc  
+    ON hrb.RCNNO = rc.RCNNO  
+JOIN HOTELROOMCATEGORIES hrc  
+    ON hrc.HTNNO = h.HTNNO  
+    -- If HOTELROOMCATEGORIES has RCNNO, this is strongly recommended to avoid duplicates:  
+    -- AND hrc.RCNNO = rc.RCNNO  
+JOIN HOTELINVENTORY hi  
+    ON hi.HRNNO = hrc.HRNNO  
+JOIN HOTELROOMTYPECOSTS hrtc  
+    ON hrtc.HINNO = hi.HINNO  
+  
+WHERE  
+    e.EMNNO = @EMNNO  
+    AND hrb.HBDTXLD IS NULL  
+    AND hrb.HBNAPPROVED = 1  
+    AND ISNULL(hrb.HBCLNM,'') + ISNULL(hrb.HBCFNM,'') <> 'CompTournament'  
+    AND ISNULL(hrb.HBCLNM,'') + ISNULL(hrb.HBCFNM,'') <> 'BillingsleyJohn'  
+  
+GROUP BY  
+      h.HTNNO,  
+      rc.RCCACRO;  
+  
+  
+  
+  
+--------------------------Table -2 Sum of room nights    
+select   SUM(DATEDIFF(DAY, RSDTARR, RSDTDEP)) AS Total_Nights    
+FROM         
+HOTEL       
+LEFT OUTER JOIN HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO       
+LEFT OUTER JOIN RESERVATIONS ON HOTELROOMBLOCKS.HBNNO=RESERVATIONS.HBNNO      
+LEFT OUTER JOIN REGMST on REGMST.RGNNO=RESERVATIONS.RGNNO      
+LEFT OUTER JOIN EVENTS ON HOTEL.EMNNO=EVENTS.EMNNO       
+LEFT OUTER JOIN ROOMCATEGORIES ON HOTELROOMBLOCKS.RCNNO=ROOMCATEGORIES.RCNNO      
+WHERE       
+EVENTS.EMNNO = @EMNNO and HOTELROOMBLOCKS.HBDTXLD is null and HOTELROOMBLOCKS.HBNAPPROVED=1       
+And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'CompTournament'      
+And isnull(HOTELROOMBLOCKS.HBCLNM,'')+isnull(HOTELROOMBLOCKS.HBCFNM,'')<>'BillingsleyJohn'   and RESERVATIONS.RSDTXLD is NULL;    
+    
+    
+      
+  END 
