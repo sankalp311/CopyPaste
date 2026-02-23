@@ -10,7 +10,6 @@ BEGIN
 
     -------------------------------------------------------------------------
     -- 0) Base Reservation list for the event (matches Crystal join path)
-    --    Crystal path: EVENTS -> REGMST -> ACTMST -> RESERVATIONS
     -------------------------------------------------------------------------
     CREATE TABLE #ResMap
     (
@@ -31,9 +30,7 @@ BEGIN
     GROUP BY r.RSNNO;
 
     -------------------------------------------------------------------------
-    -- 1) Transaction totals per reservation (replaces Crystal Running Totals)
-    --    RunFees  = sum(FEES)
-    --    RunPayments = sum(PAYMENTS)
+    -- 1) Transaction totals per reservation
     -------------------------------------------------------------------------
     CREATE TABLE #TxnAgg
     (
@@ -47,15 +44,8 @@ BEGIN
     INSERT INTO #TxnAgg (RSNNO, TotalCharges, PymtsAdj, BalanceRaw, MaxACNDSBAMT)
     SELECT
         a.RSNNO,
-
-        -- Crystal Fees:
-        -- if ACCTXTYPE='GF' then ACNEXTAMT else 0
         SUM(CASE WHEN a.ACCTXTYPE = 'GF'
                  THEN ISNULL(a.ACNEXTAMT,0) ELSE 0 END) AS TotalCharges,
-
-        -- Crystal Payments:
-        -- CA/CH/CR/WI/XI/XO/AD => ACNEXTAMT * -1
-        -- RF => ACNEXTAMT
         SUM(CASE
                 WHEN a.ACCTXTYPE IN ('CA','CH','CR','WI','XI','XO','AD')
                     THEN ISNULL(a.ACNEXTAMT,0) * (-1)
@@ -63,8 +53,6 @@ BEGIN
                     THEN ISNULL(a.ACNEXTAMT,0)
                 ELSE 0
             END) AS PymtsAdj,
-
-        -- BalanceRaw = RunFees + RunPayments
         SUM(CASE WHEN a.ACCTXTYPE = 'GF'
                  THEN ISNULL(a.ACNEXTAMT,0) ELSE 0 END)
         +
@@ -75,15 +63,13 @@ BEGIN
                     THEN ISNULL(a.ACNEXTAMT,0)
                 ELSE 0
             END) AS BalanceRaw,
-
-        -- used by Crystal Deposit/Deposit2
         ISNULL(MAX(a.ACNDSBAMT),0) AS MaxACNDSBAMT
     FROM dbo.ACTMST a
     JOIN #ResMap rm ON rm.RSNNO = a.RSNNO
     GROUP BY a.RSNNO;
 
     -------------------------------------------------------------------------
-    -- 2) Night aggregates (used for AvgRate / DisplayRunRate / ZeroRateText)
+    -- 2) Night aggregates
     -------------------------------------------------------------------------
     CREATE TABLE #NightAgg
     (
@@ -105,7 +91,37 @@ BEGIN
     GROUP BY rn.RSNNO;
 
     -------------------------------------------------------------------------
-    -- SELECT #1 : Main/Header dataset (ONE ROW per RSNNO)
+    -- ✅ NEW: Deposit Grid rows (your old SELECT #2) for all RSNNO in event
+    -------------------------------------------------------------------------
+    CREATE TABLE #DepBase
+    (
+        RSNNO       INT NOT NULL,
+        HINNO       INT NOT NULL,
+        HIDATE      DATE NULL,
+        HCNCOST     DECIMAL(18,2) NULL,
+        HCNDEPOSIT  DECIMAL(18,2) NULL,
+        RoomBalance DECIMAL(18,2) NULL
+    );
+
+    INSERT INTO #DepBase (RSNNO, HINNO, HIDATE, HCNCOST, HCNDEPOSIT, RoomBalance)
+    SELECT
+        rn.RSNNO,
+        hi.HINNO,
+        CAST(hi.HIDATE AS DATE) AS HIDATE,
+        MAX(CAST(ISNULL(hrtc.HCNCOST,0) AS DECIMAL(18,2))) AS HCNCOST,
+        MAX(CAST(ISNULL(hrtc.HCNDEPOSIT,0) AS DECIMAL(18,2))) AS HCNDEPOSIT,
+        MAX(CAST(ISNULL(hrtc.HCNCOST,0) - ISNULL(hrtc.HCNDEPOSIT,0) AS DECIMAL(18,2))) AS RoomBalance
+    FROM dbo.RESNIGHTS rn
+    JOIN #ResMap m                ON m.RSNNO = rn.RSNNO
+    JOIN dbo.HOTELINVENTORY hi    ON hi.HINNO = rn.HINNO
+    JOIN dbo.HOTELROOMTYPECOSTS hrtc ON hrtc.HINNO = hi.HINNO
+    GROUP BY rn.RSNNO, hi.HINNO, CAST(hi.HIDATE AS DATE);
+
+    CREATE CLUSTERED INDEX IX_DepBase ON #DepBase(RSNNO, HIDATE, HINNO);
+
+    -------------------------------------------------------------------------
+    -- SELECT #1 : Main/Header dataset (UNCHANGED columns)
+    -- ✅ Only appended 4 new columns at END + joined #DepBase
     -------------------------------------------------------------------------
     SELECT
         -- Event
@@ -178,12 +194,9 @@ BEGIN
         ---------------------------------------------------------------------
         -- Crystal Formulas (pre-calculated)
         ---------------------------------------------------------------------
-
-        -- PrtSuffix
         CASE WHEN ISNULL(LTRIM(RTRIM(rg.RGCPSFX)),'') <> ''
              THEN ', ' + LTRIM(RTRIM(rg.RGCPSFX)) ELSE '' END AS PrtSuffix,
 
-        -- FullName
         CASE WHEN ISNULL(LTRIM(RTRIM(rg.RGCPPFX)),'') <> ''
              THEN LTRIM(RTRIM(rg.RGCPPFX)) + ' ' + ISNULL(rg.RGCPFNM,'') + ' ' + ISNULL(rg.RGCPLNM,'')
                   + CASE WHEN ISNULL(LTRIM(RTRIM(rg.RGCPSFX)),'') <> ''
@@ -193,36 +206,29 @@ BEGIN
                          THEN ', ' + LTRIM(RTRIM(rg.RGCPSFX)) ELSE '' END
         END AS FullName,
 
-        -- CancelFlag
         CASE WHEN r.RSDTXLD IS NULL THEN 'b' ELSE 'a' END AS CancelFlag,
 
-        -- NameRegno (Crystal sort key)
         CASE
             WHEN ISNULL(rg.RGCPLNM,'') = '' THEN 'AAAAAAAA' + ISNULL(rg.RGCPFNM,'') + CAST(rg.RGNNO AS VARCHAR(20))
             WHEN ISNULL(rg.RGCPFNM,'') = '' THEN ISNULL(rg.RGCPLNM,'') + 'AAAAAAA' + CAST(rg.RGNNO AS VARCHAR(20))
             ELSE ISNULL(rg.RGCPLNM,'') + ISNULL(rg.RGCPFNM,'') + CAST(rg.RGNNO AS VARCHAR(20))
         END AS NameRegno,
 
-        -- HotelRessort (Crystal group key)
         (CASE WHEN r.RSDTXLD IS NULL THEN 'b' ELSE 'a' END)
         + CAST(ISNULL(r.HTNNO,0) AS VARCHAR(20))
         + CAST(r.RSNNO AS VARCHAR(20)) AS HotelRessort,
 
-        -- NbrNites
         DATEDIFF(DAY, r.RSDTARR, r.RSDTDEP) AS NbrNites,
 
-        -- Hotel-CityStZip
         CASE WHEN ISNULL(LTRIM(RTRIM(h.HTCCITY)),'') = ''
              THEN ISNULL(h.HTCST,'') + '  ' + ISNULL(h.HTCZIP,'')
              ELSE h.HTCCITY + ', ' + ISNULL(h.HTCST,'') + '  ' + ISNULL(h.HTCZIP,'')
         END AS Hotel_CityStZip,
 
-        -- HotelRequests / PersonReq / OnlyRequests
         CASE WHEN ISNULL(r.RSCREQUESTSTRING,'') = '' THEN '' ELSE r.RSCREQUESTSTRING END AS HotelRequests,
         CASE WHEN ISNULL(r.RSCPERSONCOMMENTS,'') = '' THEN '' ELSE ', ' + r.RSCPERSONCOMMENTS END AS HotelPersonReq,
         CASE WHEN ISNULL(r.RSCHOTELCOMMENTS,'') = '' THEN '' ELSE ', ' + r.RSCHOTELCOMMENTS END AS HotelOnlyRequests,
 
-        -- HotelMstrAcctReq (uses the 3 strings above conceptually)
         CASE
             WHEN r.RSNMASTERACCOUNT = 1
                  AND (
@@ -241,7 +247,6 @@ BEGIN
             ELSE ''
         END AS HotelMstrAcctReq,
 
-        -- Hotel-AllSpecialRequests (Crystal version: HotelRequests + HotelPersonReq + HotelMstrAcctReq)
         (
           (CASE WHEN ISNULL(r.RSCREQUESTSTRING,'') = '' THEN '' ELSE r.RSCREQUESTSTRING END)
         + (CASE WHEN ISNULL(r.RSCPERSONCOMMENTS,'') = '' THEN '' ELSE ', ' + r.RSCPERSONCOMMENTS END)
@@ -264,49 +269,41 @@ BEGIN
           END)
         ) AS Hotel_AllSpecialRequests,
 
-        -- MinNights
         CASE WHEN h.HTNUSE_HOTEL_DEFAULTS = 1 AND h.HTNMIN_NIGHTS IS NOT NULL
              THEN LEFT(CAST(h.HTNMIN_NIGHTS AS VARCHAR(10)),1) + ' night minimum stay required'
              ELSE ''
         END AS MinNights,
 
-        -- Rm+Category
         ISNULL(rt.RTCDESC,'') + ' - ' + ISNULL(rc.RCCDESC,'') AS RmCategory,
 
-        -- CCGtd
         CASE WHEN r.RSCCCTYPE IS NULL OR LTRIM(RTRIM(r.RSCCCTYPE)) = ''
              THEN ''
              ELSE 'CC Gtd by - ' + UPPER(LTRIM(RTRIM(r.RSCCCTYPE))) + '/' + ISNULL(r.RSCCCNO_MSK,'')
         END AS CCGtd,
 
-        -- CCExpTest
         CASE
-    WHEN ISNULL(LTRIM(RTRIM(r.RSCCCEXP)),'') = '' THEN 'No CC Expiration Date'
-    WHEN r.RSDTARR IS NULL THEN ''  -- no arrival date to compare
-    WHEN exp.ExpMM IS NULL OR exp.ExpYY IS NULL
-         OR exp.ExpMM NOT BETWEEN 1 AND 12
-         OR exp.ExpYY NOT BETWEEN 0 AND 99
-        THEN 'No CC Expiration Date'
-    WHEN DATEADD(DAY, 30, DATEFROMPARTS(2000 + exp.ExpYY, exp.ExpMM, 2)) < CAST(r.RSDTARR AS DATE)
-        THEN 'Card Expired'
-    ELSE ''
-END AS CCExpTest,
+            WHEN ISNULL(LTRIM(RTRIM(r.RSCCCEXP)),'') = '' THEN 'No CC Expiration Date'
+            WHEN r.RSDTARR IS NULL THEN ''
+            WHEN exp.ExpMM IS NULL OR exp.ExpYY IS NULL
+                 OR exp.ExpMM NOT BETWEEN 1 AND 12
+                 OR exp.ExpYY NOT BETWEEN 0 AND 99
+                THEN 'No CC Expiration Date'
+            WHEN DATEADD(DAY, 30, DATEFROMPARTS(2000 + exp.ExpYY, exp.ExpMM, 2)) < CAST(r.RSDTARR AS DATE)
+                THEN 'Card Expired'
+            ELSE ''
+        END AS CCExpTest,
 
-        -- RunFees / RunPayments (Crystal running totals replaced by totals)
         ISNULL(tx.TotalCharges,0) AS RunFees,
         ISNULL(tx.PymtsAdj,0)     AS RunPayments,
 
-        -- BalanceAmount
         CASE WHEN ISNULL(tx.BalanceRaw,0) > 0 THEN ISNULL(tx.BalanceRaw,0) ELSE 0 END AS BalanceAmount,
 
-        -- BalanceLabel
         CASE
             WHEN (CASE WHEN ISNULL(tx.BalanceRaw,0) > 0 THEN ISNULL(tx.BalanceRaw,0) ELSE 0 END) > 0 THEN 'Balance Due:'
             WHEN (CASE WHEN ISNULL(tx.BalanceRaw,0) > 0 THEN ISNULL(tx.BalanceRaw,0) ELSE 0 END) < 0 THEN 'Amount Due'
             ELSE 'Paid in Full/Balance:'
         END AS BalanceLabel,
 
-        -- Deposit
         CASE
             WHEN ISNULL(tx.MaxACNDSBAMT,0) > 0
                  AND (CASE WHEN r.RSCCCTYPE IS NULL OR LTRIM(RTRIM(r.RSCCCTYPE)) = '' THEN '' ELSE 'X' END) = ''
@@ -314,7 +311,6 @@ END AS CCExpTest,
             ELSE 0
         END AS Deposit,
 
-        -- Deposit2
         CASE
             WHEN (CASE WHEN r.RSCCCTYPE IS NULL OR LTRIM(RTRIM(r.RSCCCTYPE)) = '' THEN '' ELSE 'X' END) <> ''
                  AND ISNULL(tx.MaxACNDSBAMT,0) <> 0
@@ -322,7 +318,6 @@ END AS CCExpTest,
             ELSE 0
         END AS Deposit2,
 
-        -- NoDepositPd  (mapped to TotalCharges instead of a single ACNEXTAMT row)
         CASE
             WHEN (CASE WHEN r.RSCCCTYPE IS NULL OR LTRIM(RTRIM(r.RSCCCTYPE)) = '' THEN '' ELSE 'X' END) = ''
                  AND (CASE WHEN ISNULL(tx.BalanceRaw,0) > 0 THEN ISNULL(tx.BalanceRaw,0) ELSE 0 END) = 0
@@ -335,30 +330,33 @@ END AS CCExpTest,
             ELSE ''
         END AS NoDepositPd,
 
-        -- ResCanceledText
         CASE WHEN r.RSDTXLD IS NULL THEN '' ELSE '**** Room Cancelled ****' END AS ResCanceledText,
 
-        -- AvgRate (Sum(HCNCOST)/NbrNites)
         CASE
             WHEN DATEDIFF(DAY, r.RSDTARR, r.RSDTDEP) = 0 THEN 0
             ELSE ISNULL(na.SumHCNCOST,0) / NULLIF(DATEDIFF(DAY, r.RSDTARR, r.RSDTDEP),0)
         END AS AvgRate,
 
-        -- DisplayRunRate (Sum(RNMPERNIGHTCHARGE)/Count)
         CASE WHEN ISNULL(na.CntRNCharge,0) = 0 THEN 0
              ELSE ISNULL(na.SumRNCharge,0) / NULLIF(na.CntRNCharge,0)
         END AS DisplayRunRate,
 
-        -- ZeroRateText
         CASE WHEN ISNULL(na.SumRNCharge,0) = 0
              THEN 'Please contact Traveling Teams for Rate Information'
              ELSE ''
         END AS ZeroRateText,
 
-        -- Footer numbers (seen in PDF)
         ISNULL(tx.TotalCharges,0) AS TotalCharges,
         ISNULL(tx.PymtsAdj,0)     AS PymtsAdj,
-        CASE WHEN ISNULL(tx.BalanceRaw,0) > 0 THEN ISNULL(tx.BalanceRaw,0) ELSE 0 END AS PaidInFullBalance
+        CASE WHEN ISNULL(tx.BalanceRaw,0) > 0 THEN ISNULL(tx.BalanceRaw,0) ELSE 0 END AS PaidInFullBalance,
+
+        ---------------------------------------------------------------------
+        -- ✅ ONLY NEW COLUMNS (appended at end)
+        ---------------------------------------------------------------------
+        d.HIDATE,
+        d.HCNCOST,
+        d.HCNDEPOSIT,
+        d.RoomBalance
 
     FROM #ResMap m
     JOIN dbo.EVENTS e       ON e.EMNNO = @EMNNO
@@ -366,17 +364,21 @@ END AS CCExpTest,
     LEFT JOIN dbo.REGUSER ru ON ru.RGNNO = rg.RGNNO
     LEFT JOIN dbo.CATEGORY c ON c.CMNNO = rg.CMNNO
     JOIN dbo.RESERVATIONS r  ON r.RSNNO = m.RSNNO
-	OUTER APPLY
-	(
-		SELECT
-			TRY_CONVERT(int, NULLIF(LEFT(LTRIM(RTRIM(r.RSCCCEXP)), 2), ''))  AS ExpMM,
-			TRY_CONVERT(int, NULLIF(RIGHT(LTRIM(RTRIM(r.RSCCCEXP)), 2), '')) AS ExpYY
-	) exp
+    OUTER APPLY
+    (
+        SELECT
+            TRY_CONVERT(int, NULLIF(LEFT(LTRIM(RTRIM(r.RSCCCEXP)), 2), ''))  AS ExpMM,
+            TRY_CONVERT(int, NULLIF(RIGHT(LTRIM(RTRIM(r.RSCCCEXP)), 2), '')) AS ExpYY
+    ) exp
     LEFT JOIN dbo.HOTEL h    ON h.HTNNO = r.HTNNO
     LEFT JOIN dbo.ROOMTYPES rt       ON rt.RTNNO = r.RTNNO
     LEFT JOIN dbo.ROOMCATEGORIES rc  ON rc.RCNNO = r.RCNNO
     LEFT JOIN #TxnAgg tx     ON tx.RSNNO = r.RSNNO
     LEFT JOIN #NightAgg na   ON na.RSNNO = r.RSNNO
+
+    -- ✅ NEW JOIN (makes multiple rows per RSNNO)
+    LEFT JOIN #DepBase d     ON d.RSNNO = r.RSNNO
+
     ORDER BY
         e.EMNNO,
         CASE
@@ -387,30 +389,28 @@ END AS CCExpTest,
         (CASE WHEN r.RSDTXLD IS NULL THEN 'b' ELSE 'a' END)
         + CAST(ISNULL(r.HTNNO,0) AS VARCHAR(20))
         + CAST(r.RSNNO AS VARCHAR(20)),
-        r.RSNNO;
-
-    -------------------------------------------------------------------------
-    -- SELECT #2 : Deposit Grid dataset (multi rows per RSNNO)
-    -- Crystal subreport:
-    -- RESNIGHTS -> RESERVATIONS -> (HRTC -> HOTELINVENTORY on HINNO)
-    -------------------------------------------------------------------------
-    SELECT DISTINCT
         r.RSNNO,
-        hi.HINNO,
-        hi.HIDATE,
-        hrtc.HCNCOST,
-        hrtc.HCNDEPOSIT,
-        rn.RNMPERNIGHTCHARGE,
-        (ISNULL(hrtc.HCNCOST,0) - ISNULL(hrtc.HCNDEPOSIT,0)) AS RoomBalance
-    FROM dbo.RESNIGHTS rn
-    JOIN dbo.RESERVATIONS r       ON r.RSNNO = rn.RSNNO
-    JOIN #ResMap m                ON m.RSNNO = r.RSNNO
-    JOIN dbo.HOTELINVENTORY hi    ON hi.HINNO = rn.HINNO
-    JOIN dbo.HOTELROOMTYPECOSTS hrtc ON hrtc.HINNO = hi.HINNO
-    ORDER BY
-        r.RSNNO,
-        hi.HIDATE,
-        hi.HINNO;
+        d.HIDATE,
+        d.HINNO;
 
 END
 GO
+
+
+
+gpt in this above sp i want to add another select which is releated to my another subreport data.
+
+heres below is the crystal report sql
+And you need to write it correctly on behalf if RSNNO.
+
+in the below sql already have RSNNO but not from reservation table.
+we need to select Reservation.RSNNO as ResRSNNO so that i can map easily.
+
+below is crystal sql
+
+
+ SELECT "ACTMST"."ACNEXTAMT", "ACTMST"."ACCDSC", "REGMST"."RGCPLNM", "REGMST"."RGCPFNM", "REGMST"."RGNNO", "ACTMST"."ACNQTY", "ACTMST"."ACCTXTYPE", "REGMST"."RGCPPFX", "REGMST"."RGCPSFX", "EVENTS"."EMNNO", "ACTMST"."ACNNO", "ACTIVITY_BOOKING"."ABNCANCELED", "ROOMMATES"."RMNNO", "ACTMST"."ACNPRTFLG", "ACTMST"."ABNNO", "ACTMST"."RSNNO", "ACTMST"."CMNNO", "ACTIVITY"."AVNPRTCNF", "REGMST"."RGCGRPNO", "REGMST"."RGCNO"
+ FROM   ((((("ICM"."dbo"."EVENTS" "EVENTS" INNER JOIN "ICM"."dbo"."REGMST" "REGMST" ON "EVENTS"."EMNNO"="REGMST"."EMNNO") INNER JOIN "ICM"."dbo"."ACTMST" "ACTMST" ON "REGMST"."RGNNO"="ACTMST"."RGNNO") LEFT OUTER JOIN "ICM"."dbo"."ACTIVITY_BOOKING" "ACTIVITY_BOOKING" ON "ACTMST"."ABNNO"="ACTIVITY_BOOKING"."ABNNO") LEFT OUTER JOIN "ICM"."dbo"."RESERVATIONS" "RESERVATIONS" ON "ACTMST"."RSNNO"="RESERVATIONS"."RSNNO") LEFT OUTER JOIN "ICM"."dbo"."ROOMMATES" "ROOMMATES" ON "RESERVATIONS"."RSNNO"="ROOMMATES"."RSNNO") LEFT OUTER JOIN "ICM"."dbo"."ACTIVITY" "ACTIVITY" ON "ACTIVITY_BOOKING"."AVNNO"="ACTIVITY"."AVNNO"
+ WHERE  "REGMST"."RGNNO"=1070187
+ ORDER BY "EVENTS"."EMNNO", "REGMST"."RGCGRPNO"
+
