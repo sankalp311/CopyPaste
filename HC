@@ -108,6 +108,9 @@ namespace ReportRDLC.Report16
                // Make sure token ?t=... is decoded (if present)
                InitSecureQueryFromToken();
 
+               if (TryHandleDbPdfModes())
+                    return;
+
                // If a token was supplied but we failed to resolve it,
                // show a clear error and stop.
                var rawToken = (Request.QueryString["t"] ?? "").Trim();
@@ -641,11 +644,47 @@ namespace ReportRDLC.Report16
                     TraceLog("EXIT RunReport (Excel path)", stage: "EXIT");
                     return; // CRITICAL: stop executing this handle
                }
+               //               else if (v == "P")
+               //               {
+               //                    string pageWidth = string.IsNullOrWhiteSpace(meta.PageWidth) ? "14in" : meta.PageWidth;
+               //                    string pageHeight = string.IsNullOrWhiteSpace(meta.PageHeight) ? "11.69in" : meta.PageHeight;
+               //                    BindToReportAuto(rdlcVirtual, data, forExcel: false);
+               //                    string deviceInfo = $@"<DeviceInfo>
+               //  <OutputFormat>PDF</OutputFormat>
+               //  <PageWidth>{pageWidth}</PageWidth>
+               //  <PageHeight>{pageHeight}</PageHeight>
+               //  <MarginTop>0.25in</MarginTop>
+               //  <MarginLeft>0.25in</MarginLeft>
+               //  <MarginRight>0.25in</MarginRight>
+               //  <MarginBottom>0.25in</MarginBottom>
+               //</DeviceInfo>";
+               //                  //  RenderHugePdf_NoLock(rv.LocalReport, deviceInfo, "Report.pdf", inline: true);
+               //                   // RenderToHttp("PDF", "application/pdf", "Report.pdf", deviceInfo);
+               //                    RenderHugePdf_Safe(rv.LocalReport, deviceInfo, "Report.pdf", inline: true);
+               //                    return;
+
+               //               }
+
+
                else if (v == "P")
                {
+                    // Build params from mapping (same logic as your existing map)
+                    var bag = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                    // NOTE: simplest is: reuse existing mapped execution builder once:
+                    // We'll just create a SqlCommand, BuildParametersFromMap fills it, then copy to bag.
+
+                    using (var tmpCon = new SqlConnection(cs))
+                    using (var tmpCmd = new SqlCommand(meta.SpName, tmpCon) { CommandType = CommandType.StoredProcedure })
+                    {
+                         BuildParametersFromMap(cs, rptId, tmpCmd);
+                         foreach (SqlParameter p in tmpCmd.Parameters)
+                              if (p.Direction != ParameterDirection.ReturnValue)
+                                   bag[p.ParameterName] = (p.Value == DBNull.Value) ? null : p.Value;
+                    }
+
                     string pageWidth = string.IsNullOrWhiteSpace(meta.PageWidth) ? "14in" : meta.PageWidth;
                     string pageHeight = string.IsNullOrWhiteSpace(meta.PageHeight) ? "11.69in" : meta.PageHeight;
-                    BindToReportAuto(rdlcVirtual, data, forExcel: false);
+
                     string deviceInfo = $@"<DeviceInfo>
   <OutputFormat>PDF</OutputFormat>
   <PageWidth>{pageWidth}</PageWidth>
@@ -655,11 +694,18 @@ namespace ReportRDLC.Report16
   <MarginRight>0.25in</MarginRight>
   <MarginBottom>0.25in</MarginBottom>
 </DeviceInfo>";
-                  //  RenderHugePdf_NoLock(rv.LocalReport, deviceInfo, "Report.pdf", inline: true);
-                   // RenderToHttp("PDF", "application/pdf", "Report.pdf", deviceInfo);
-                    RenderHugePdf_Safe(rv.LocalReport, deviceInfo, "Report.pdf", inline: true);
-                    return;
 
+                    StartDbPdfJobAndShowLoader(
+                        cs: cs,
+                        rptIdStr: rptId,
+                        spName: meta.SpName,
+                        rdlcVirtual: rdlcVirtual,
+                        bag: bag,
+                        deviceInfo: deviceInfo,
+                        downloadName: "Report.pdf",
+                        inline: true
+                    );
+                    return;
                }
                else
                {
@@ -2982,7 +3028,882 @@ WHERE RMNNO = @id AND IsActive = 1;";
 
 
 
+
+
           #endregion
+
+
+
+          #region === DB-Persistent Async PDF Jobs (Cloudflare + IIS recycle safe) ==============================
+
+          /*
+          HOW IT WORKS
+          - When V=P (PDF), instead of rendering inline in the same request (Cloudflare 2-min timeout),
+            we:
+            1) INSERT a job row in DB (Queued) with all SP params (JSON)
+            2) Immediately return a Loader HTML page (fast response)
+            3) Loader polls ?mode=status&id=JOBID
+            4) Server reads DB status. If Queued or stale Running -> it re-kicks a background worker.
+            5) Worker claims the job in DB, renders PDF to disk, updates DB (Completed + FilePath)
+            6) Loader navigates same-tab to ?mode=download&id=JOBID to stream the PDF.
+          */
+
+          private const int PDF_JOB_EXPIRE_HOURS = 12;      // keep files/jobs for 12 hours
+          private const int PDF_STALE_MINUTES = 10;        // if worker dies, heartbeat goes stale -> re-kick
+          private const int PDF_HEARTBEAT_SECONDS = 20;    // write heartbeat while rendering
+          private const int PDF_CLAIM_TIMEOUT_SECONDS = 3; // DB claim lock wait
+
+          private class BagItem
+          {
+               public string Name;  // e.g. "@EMNNO"
+               public string Type;  // "int"|"datetime"|"bit"|"decimal"|"string"
+               public string Value; // invariant string or ISO for datetime
+          }
+
+          private static string Sha256Base64(string s)
+          {
+               using (var sha = System.Security.Cryptography.SHA256.Create())
+               {
+                    var b = sha.ComputeHash(Encoding.UTF8.GetBytes(s ?? ""));
+                    return Convert.ToBase64String(b); // length 44, but keep nvarchar(88) safe
+               }
+          }
+
+          private static string Js(object o) => new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(o);
+
+          private static string SerializeBag(IDictionary<string, object> bag)
+          {
+               var list = new List<BagItem>();
+               if (bag != null)
+               {
+                    foreach (var kv in bag)
+                    {
+                         var v = kv.Value;
+                         if (v == null || v == DBNull.Value)
+                         {
+                              list.Add(new BagItem { Name = kv.Key, Type = "string", Value = null });
+                              continue;
+                         }
+
+                         if (v is int || v is long)
+                              list.Add(new BagItem { Name = kv.Key, Type = "int", Value = Convert.ToInt64(v, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) });
+                         else if (v is bool)
+                              list.Add(new BagItem { Name = kv.Key, Type = "bit", Value = ((bool)v) ? "1" : "0" });
+                         else if (v is decimal)
+                              list.Add(new BagItem { Name = kv.Key, Type = "decimal", Value = ((decimal)v).ToString(CultureInfo.InvariantCulture) });
+                         else if (v is double || v is float)
+                              list.Add(new BagItem { Name = kv.Key, Type = "decimal", Value = Convert.ToDouble(v, CultureInfo.InvariantCulture).ToString(CultureInfo.InvariantCulture) });
+                         else if (v is DateTime)
+                              list.Add(new BagItem { Name = kv.Key, Type = "datetime", Value = ((DateTime)v).ToString("o", CultureInfo.InvariantCulture) });
+                         else
+                              list.Add(new BagItem { Name = kv.Key, Type = "string", Value = Convert.ToString(v, CultureInfo.InvariantCulture) });
+                    }
+               }
+               return Js(list);
+          }
+
+          private static Dictionary<string, object> DeserializeBag(string json)
+          {
+               var bag = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+               if (string.IsNullOrWhiteSpace(json)) return bag;
+
+               var ser = new System.Web.Script.Serialization.JavaScriptSerializer();
+               var list = ser.Deserialize<List<BagItem>>(json) ?? new List<BagItem>();
+
+               foreach (var it in list)
+               {
+                    if (it == null || string.IsNullOrWhiteSpace(it.Name))
+                         continue;
+
+                    object v = null;
+                    var type = (it.Type ?? "").ToLowerInvariant();
+
+                    if (string.IsNullOrWhiteSpace(it.Value))
+                    {
+                         v = null;
+                    }
+                    else if (type == "int")
+                    {
+                         if (long.TryParse(it.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var lv))
+                              v = (lv <= int.MaxValue && lv >= int.MinValue) ? (object)(int)lv : lv;
+                         else v = it.Value;
+                    }
+                    else if (type == "bit")
+                    {
+                         v = (it.Value == "1" || it.Value.Equals("true", StringComparison.OrdinalIgnoreCase));
+                    }
+                    else if (type == "decimal")
+                    {
+                         if (decimal.TryParse(it.Value, NumberStyles.Any, CultureInfo.InvariantCulture, out var dv))
+                              v = dv;
+                         else v = it.Value;
+                    }
+                    else if (type == "datetime")
+                    {
+                         if (DateTime.TryParse(it.Value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
+                              v = dt;
+                         else v = it.Value;
+                    }
+                    else
+                    {
+                         v = it.Value;
+                    }
+
+                    bag[it.Name] = v;
+               }
+
+               return bag;
+          }
+
+          /* =================== ENTRY: Page_Load early return handlers =================== */
+
+          private bool TryHandleDbPdfModes()
+          {
+               var mode = (Request.QueryString["mode"] ?? "").Trim().ToLowerInvariant();
+               if (string.IsNullOrEmpty(mode)) return false;
+
+               if (mode == "status")
+               {
+                    HandleDbPdfStatus();
+                    return true;
+               }
+               if (mode == "download")
+               {
+                    HandleDbPdfDownload();
+                    return true;
+               }
+
+               return false;
+          }
+
+          /* =================== DB CRUD =================== */
+
+          private void DbInsertJob(string cs, Guid jobId, int rptId, string spName, string rdlcPath, string deviceInfo,
+                                   string downloadName, bool inline, string paramJson, string sessionHash, DateTime expireUtc)
+          {
+               const string sql = @"
+INSERT INTO ICM.dbo.ReportRenderJobs
+(JobId, Status, CreatedUtc, UpdatedUtc, HeartbeatUtc, RptId, SpName, RdlcPath, DeviceInfo, DownloadName, Inline, ParamJson, SessionHash, ExpireUtc)
+VALUES
+(@JobId, 'Queued', SYSUTCDATETIME(), SYSUTCDATETIME(), NULL, @RptId, @SpName, @RdlcPath, @DeviceInfo, @DownloadName, @Inline, @ParamJson, @SessionHash, @ExpireUtc);";
+
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(sql, con))
+               {
+                    cmd.Parameters.Add("@JobId", SqlDbType.UniqueIdentifier).Value = jobId;
+                    cmd.Parameters.Add("@RptId", SqlDbType.Int).Value = rptId;
+                    cmd.Parameters.Add("@SpName", SqlDbType.NVarChar, 256).Value = (object)spName ?? DBNull.Value;
+                    cmd.Parameters.Add("@RdlcPath", SqlDbType.NVarChar, 300).Value = (object)rdlcPath ?? DBNull.Value;
+                    cmd.Parameters.Add("@DeviceInfo", SqlDbType.NVarChar, -1).Value = (object)deviceInfo ?? DBNull.Value;
+                    cmd.Parameters.Add("@DownloadName", SqlDbType.NVarChar, 200).Value = (object)downloadName ?? DBNull.Value;
+                    cmd.Parameters.Add("@Inline", SqlDbType.Bit).Value = inline ? 1 : 0;
+                    cmd.Parameters.Add("@ParamJson", SqlDbType.NVarChar, -1).Value = (object)paramJson ?? DBNull.Value;
+                    cmd.Parameters.Add("@SessionHash", SqlDbType.NVarChar, 88).Value = (object)sessionHash ?? DBNull.Value;
+                    cmd.Parameters.Add("@ExpireUtc", SqlDbType.DateTime2).Value = expireUtc;
+
+                    con.Open();
+                    cmd.ExecuteNonQuery();
+               }
+          }
+
+          private (string Status, string Error, string FilePath, string SessionHash, DateTime? HeartbeatUtc, DateTime UpdatedUtc,
+                   int RptId, string SpName, string RdlcPath, string DeviceInfo, string DownloadName, bool Inline, string ParamJson)
+              DbGetJob(string cs, Guid jobId)
+          {
+               const string sql = @"
+SELECT TOP(1)
+   Status, Error, FilePath, SessionHash, HeartbeatUtc, UpdatedUtc,
+   ISNULL(RptId,0) as RptId, SpName, RdlcPath, DeviceInfo, DownloadName, Inline, ParamJson
+FROM ICM.dbo.ReportRenderJobs WITH (READCOMMITTED)
+WHERE JobId=@JobId;";
+
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(sql, con))
+               {
+                    cmd.Parameters.Add("@JobId", SqlDbType.UniqueIdentifier).Value = jobId;
+                    con.Open();
+                    using (var r = cmd.ExecuteReader())
+                    {
+                         if (!r.Read())
+                              return (null, null, null, null, null, DateTime.UtcNow, 0, null, null, null, null, true, null);
+
+                         string status = r["Status"] as string;
+                         string err = r["Error"] as string;
+                         string path = r["FilePath"] as string;
+                         string sh = r["SessionHash"] as string;
+                         DateTime? hb = (r["HeartbeatUtc"] == DBNull.Value) ? (DateTime?)null : (DateTime)r["HeartbeatUtc"];
+                         DateTime upd = (DateTime)r["UpdatedUtc"];
+                         int rptId = Convert.ToInt32(r["RptId"], CultureInfo.InvariantCulture);
+                         string sp = r["SpName"] as string;
+                         string rp = r["RdlcPath"] as string;
+                         string di = r["DeviceInfo"] as string;
+                         string dn = r["DownloadName"] as string;
+                         bool inline = r["Inline"] != DBNull.Value && Convert.ToBoolean(r["Inline"], CultureInfo.InvariantCulture);
+                         string pj = r["ParamJson"] as string;
+
+                         return (status, err, path, sh, hb, upd, rptId, sp, rp, di, dn, inline, pj);
+                    }
+               }
+          }
+
+          // claim job so only ONE worker runs it
+          private bool DbTryClaimJob(string cs, Guid jobId, Guid workerId, int staleMinutes)
+          {
+               const string sql = @"
+UPDATE ICM.dbo.ReportRenderJobs
+SET Status='Running',
+    WorkerId=@WorkerId,
+    UpdatedUtc=SYSUTCDATETIME(),
+    HeartbeatUtc=SYSUTCDATETIME(),
+    Error=NULL
+WHERE JobId=@JobId
+  AND (
+        Status IN ('Queued','Retry')
+        OR (
+            Status='Running'
+            AND (HeartbeatUtc IS NULL OR HeartbeatUtc < DATEADD(MINUTE, -@Stale, SYSUTCDATETIME()))
+        )
+      );";
+
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(sql, con))
+               {
+                    cmd.CommandTimeout = PDF_CLAIM_TIMEOUT_SECONDS;
+                    cmd.Parameters.Add("@JobId", SqlDbType.UniqueIdentifier).Value = jobId;
+                    cmd.Parameters.Add("@WorkerId", SqlDbType.UniqueIdentifier).Value = workerId;
+                    cmd.Parameters.Add("@Stale", SqlDbType.Int).Value = staleMinutes;
+
+                    con.Open();
+                    int rows = cmd.ExecuteNonQuery();
+                    return rows > 0;
+               }
+          }
+
+          private void DbHeartbeat(string cs, Guid jobId)
+          {
+               const string sql = @"
+UPDATE ICM.dbo.ReportRenderJobs
+SET HeartbeatUtc=SYSUTCDATETIME(),
+    UpdatedUtc=SYSUTCDATETIME()
+WHERE JobId=@JobId AND Status='Running';";
+
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(sql, con))
+               {
+                    cmd.Parameters.Add("@JobId", SqlDbType.UniqueIdentifier).Value = jobId;
+                    con.Open();
+                    cmd.ExecuteNonQuery();
+               }
+          }
+
+          private void DbCompleteJob(string cs, Guid jobId, string filePath)
+          {
+               const string sql = @"
+UPDATE ICM.dbo.ReportRenderJobs
+SET Status='Completed',
+    FilePath=@FilePath,
+    UpdatedUtc=SYSUTCDATETIME(),
+    HeartbeatUtc=NULL
+WHERE JobId=@JobId;";
+
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(sql, con))
+               {
+                    cmd.Parameters.Add("@JobId", SqlDbType.UniqueIdentifier).Value = jobId;
+                    cmd.Parameters.Add("@FilePath", SqlDbType.NVarChar, 400).Value = (object)filePath ?? DBNull.Value;
+                    con.Open();
+                    cmd.ExecuteNonQuery();
+               }
+          }
+
+          private void DbFailJob(string cs, Guid jobId, string error)
+          {
+               const string sql = @"
+UPDATE ICM.dbo.ReportRenderJobs
+SET Status='Failed',
+    Error=@Error,
+    UpdatedUtc=SYSUTCDATETIME(),
+    HeartbeatUtc=NULL
+WHERE JobId=@JobId;";
+
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(sql, con))
+               {
+                    cmd.Parameters.Add("@JobId", SqlDbType.UniqueIdentifier).Value = jobId;
+                    cmd.Parameters.Add("@Error", SqlDbType.NVarChar, -1).Value = (object)error ?? DBNull.Value;
+                    con.Open();
+                    cmd.ExecuteNonQuery();
+               }
+          }
+
+          // optional cleanup (called opportunistically on start/status)
+          private void DbCleanupExpired(string cs)
+          {
+               const string sql = @"
+SELECT TOP(50) JobId, FilePath
+FROM ICM.dbo.ReportRenderJobs
+WHERE ExpireUtc IS NOT NULL AND ExpireUtc < SYSUTCDATETIME();";
+
+               var toDelete = new List<(Guid JobId, string FilePath)>();
+
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(sql, con))
+               {
+                    con.Open();
+                    using (var r = cmd.ExecuteReader())
+                    {
+                         while (r.Read())
+                         {
+                              toDelete.Add((r.GetGuid(0), r.IsDBNull(1) ? null : r.GetString(1)));
+                         }
+                    }
+               }
+
+               foreach (var it in toDelete)
+               {
+                    // try delete file (only in our folder)
+                    try
+                    {
+                         if (!string.IsNullOrWhiteSpace(it.FilePath))
+                         {
+                              var tmp = Server.MapPath("~/App_Data/tmp_reports");
+                              if (it.FilePath.StartsWith(tmp, StringComparison.OrdinalIgnoreCase) && File.Exists(it.FilePath))
+                                   File.Delete(it.FilePath);
+                         }
+                    }
+                    catch { }
+
+                    try
+                    {
+                         using (var con = new SqlConnection(cs))
+                         using (var cmd = new SqlCommand("DELETE FROM ICM.dbo.ReportRenderJobs WHERE JobId=@id", con))
+                         {
+                              cmd.Parameters.Add("@id", SqlDbType.UniqueIdentifier).Value = it.JobId;
+                              con.Open();
+                              cmd.ExecuteNonQuery();
+                         }
+                    }
+                    catch { }
+               }
+          }
+
+          /* =================== STATUS + DOWNLOAD HANDLERS =================== */
+
+          private void HandleDbPdfStatus()
+          {
+               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
+
+               // light cleanup (safe)
+               try { DbCleanupExpired(cs); } catch { }
+
+               Response.Clear();
+               Response.ContentType = "application/json";
+               Response.Cache.SetCacheability(HttpCacheability.NoCache);
+               Response.Cache.SetNoStore();
+
+               var idStr = (Request.QueryString["id"] ?? "").Trim();
+               if (!Guid.TryParse(idStr, out var jobId))
+               {
+                    Response.Write(Js(new { status = "NotFound" }));
+                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                    return;
+               }
+
+               var job = DbGetJob(cs, jobId);
+               if (string.IsNullOrWhiteSpace(job.Status))
+               {
+                    Response.Write(Js(new { status = "NotFound" }));
+                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                    return;
+               }
+
+               // security: sessionid must match
+               string session = (Q("sessionid") ?? Request.QueryString["sessionid"] ?? "").Trim();
+               if (!string.IsNullOrWhiteSpace(job.SessionHash) && Sha256Base64(session) != job.SessionHash)
+               {
+                    Response.Write(Js(new { status = "Forbidden" }));
+                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                    return;
+               }
+
+               // re-kick if queued OR stale running (app pool recycle case)
+               bool staleRunning = string.Equals(job.Status, "Running", StringComparison.OrdinalIgnoreCase)
+                                   && job.HeartbeatUtc.HasValue
+                                   && job.HeartbeatUtc.Value < DateTime.UtcNow.AddMinutes(-PDF_STALE_MINUTES);
+
+               if (string.Equals(job.Status, "Queued", StringComparison.OrdinalIgnoreCase) || staleRunning)
+               {
+                    TryKickWorkerFromDb(cs, jobId);
+               }
+
+               Response.Write(Js(new { status = job.Status, error = job.Error }));
+               HttpContext.Current.ApplicationInstance.CompleteRequest();
+          }
+
+          private void HandleDbPdfDownload()
+          {
+               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
+
+               var idStr = (Request.QueryString["id"] ?? "").Trim();
+               if (!Guid.TryParse(idStr, out var jobId))
+               {
+                    Response.StatusCode = 404;
+                    Response.ContentType = "text/plain";
+                    Response.Write("Job not found.");
+                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                    return;
+               }
+
+               var job = DbGetJob(cs, jobId);
+               if (string.IsNullOrWhiteSpace(job.Status))
+               {
+                    Response.StatusCode = 404;
+                    Response.ContentType = "text/plain";
+                    Response.Write("Job not found.");
+                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                    return;
+               }
+
+               // security: sessionid must match
+               string session = (Q("sessionid") ?? Request.QueryString["sessionid"] ?? "").Trim();
+               if (!string.IsNullOrWhiteSpace(job.SessionHash) && Sha256Base64(session) != job.SessionHash)
+               {
+                    Response.StatusCode = 403;
+                    Response.ContentType = "text/plain";
+                    Response.Write("Forbidden.");
+                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                    return;
+               }
+
+               if (!string.Equals(job.Status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                   string.IsNullOrWhiteSpace(job.FilePath) ||
+                   !File.Exists(job.FilePath))
+               {
+                    Response.StatusCode = 409;
+                    Response.ContentType = "text/plain";
+                    Response.Write("PDF not ready.");
+                    HttpContext.Current.ApplicationInstance.CompleteRequest();
+                    return;
+               }
+
+               Response.Clear();
+               Response.ClearHeaders();
+               Response.TrySkipIisCustomErrors = true;
+               Response.Buffer = false;
+               Response.BufferOutput = false;
+
+               Response.Cache.SetCacheability(HttpCacheability.NoCache);
+               Response.Cache.SetNoStore();
+
+               Response.ContentType = "application/pdf";
+               Response.AddHeader("X-Content-Type-Options", "nosniff");
+
+               string disp = job.Inline ? "inline" : "attachment";
+               string fileName = string.IsNullOrWhiteSpace(job.DownloadName) ? "Report.pdf" : job.DownloadName.Trim();
+               if (!fileName.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                    fileName += ".pdf";
+
+               Response.AddHeader("Content-Disposition", $"{disp}; filename=\"{fileName}\"");
+
+               Response.TransmitFile(job.FilePath);
+               Response.Flush();
+               HttpContext.Current.ApplicationInstance.CompleteRequest();
+          }
+
+          /* =================== START JOB (call from V=P branches) =================== */
+
+          private void StartDbPdfJobAndShowLoader(string cs, string rptIdStr, string spName, string rdlcVirtual,
+                                                 Dictionary<string, object> bag, string deviceInfo,
+                                                 string downloadName, bool inline)
+          {
+               // validate session once
+               string session = (Q("sessionid") ?? "").Trim();
+               if (!ValidateSessionId(session, cs))
+               {
+                    WriteAndEnd("Invalid session!");
+                    return;
+               }
+
+               // cleanup lightly
+               try { DbCleanupExpired(cs); } catch { }
+
+               int rptId = 0;
+               int.TryParse((rptIdStr ?? "").Trim(), out rptId);
+
+               var jobId = Guid.NewGuid();
+               var sessionHash = Sha256Base64(session);
+               var paramJson = SerializeBag(bag);
+               var expireUtc = DateTime.UtcNow.AddHours(PDF_JOB_EXPIRE_HOURS);
+
+               DbInsertJob(cs, jobId, rptId, spName, rdlcVirtual, deviceInfo, downloadName, inline, paramJson, sessionHash, expireUtc);
+
+               // kick worker immediately
+               TryKickWorkerFromDb(cs, jobId);
+
+               // return loader page (fast => Cloudflare safe)
+               WriteDbLoaderHtml(jobId);
+          }
+
+          private void WriteDbLoaderHtml(Guid jobId)
+          {
+               string baseUrl = ResolveUrl(Request.Url.AbsolutePath);
+
+               // keep token if present (so Q() works in status/download)
+               string token = (Request.QueryString["t"] ?? Convert.ToString(RouteData.Values["t"]) ?? "").Trim();
+
+               string session = (Q("sessionid") ?? "").Trim();
+
+               string statusUrl = !string.IsNullOrEmpty(token)
+                   ? $"{baseUrl}?mode=status&id={jobId}&t={HttpUtility.UrlEncode(token)}"
+                   : $"{baseUrl}?mode=status&id={jobId}&sessionid={HttpUtility.UrlEncode(session)}";
+
+               string downloadUrl = !string.IsNullOrEmpty(token)
+                   ? $"{baseUrl}?mode=download&id={jobId}&t={HttpUtility.UrlEncode(token)}"
+                   : $"{baseUrl}?mode=download&id={jobId}&sessionid={HttpUtility.UrlEncode(session)}";
+
+               // safe for JS string literal
+               string jsStatusUrl = HttpUtility.JavaScriptStringEncode(statusUrl);
+               string jsDownloadUrl = HttpUtility.JavaScriptStringEncode(downloadUrl);
+
+               Response.Clear();
+               Response.TrySkipIisCustomErrors = true;
+               Response.Cache.SetCacheability(HttpCacheability.NoCache);
+               Response.Cache.SetNoStore();
+               Response.ContentType = "text/html";
+
+               var sb = new StringBuilder();
+
+               sb.AppendLine("<!doctype html>");
+               sb.AppendLine("<html>");
+               sb.AppendLine("<head>");
+               sb.AppendLine("<meta charset='utf-8' />");
+               sb.AppendLine("<title>Generating PDF…</title>");
+               sb.AppendLine("<style>");
+               sb.AppendLine(" body{font-family:Arial;padding:24px}");
+               sb.AppendLine(" .box{max-width:560px;margin:60px auto;border:1px solid #ddd;border-radius:10px;padding:22px}");
+               sb.AppendLine(" .spin{width:28px;height:28px;border:3px solid #ddd;border-top-color:#2d6cdf;border-radius:50%;animation:rot 1s linear infinite;display:inline-block;vertical-align:middle;margin-right:10px}");
+               sb.AppendLine(" @keyframes rot{to{transform:rotate(360deg)}}");
+               sb.AppendLine(" .msg{font-size:14px;color:#444;margin-top:12px}");
+               sb.AppendLine("</style>");
+               sb.AppendLine("</head>");
+               sb.AppendLine("<body>");
+               sb.AppendLine(" <div class='box'>");
+               sb.AppendLine("  <div><span class='spin'></span><b>Generating your PDF…</b></div>");
+               sb.AppendLine("  <div class='msg'>This page will automatically open the PDF when it’s ready.</div>");
+               sb.AppendLine("  <div class='msg' id='st'></div>");
+               sb.AppendLine(" </div>");
+
+               sb.AppendLine("<script>");
+               sb.AppendLine("(function(){");
+               sb.AppendLine($"  var statusUrl = \"{jsStatusUrl}\";");
+               sb.AppendLine($"  var downloadUrl = \"{jsDownloadUrl}\";");
+               sb.AppendLine("  var st = document.getElementById('st');");
+               sb.AppendLine("  function poll(){");
+               sb.AppendLine("    fetch(statusUrl, { credentials:'include', cache:'no-store' })");
+               sb.AppendLine("      .then(function(r){ return r.json(); })");
+               sb.AppendLine("      .then(function(j){");
+               sb.AppendLine("        if(j.status === 'Completed'){ window.location = downloadUrl; return; }");
+               sb.AppendLine("        if(j.status === 'Failed'){ st.innerText = 'Failed: ' + (j.error || 'Unknown error'); return; }");
+               sb.AppendLine("        if(j.status === 'Forbidden'){ st.innerText = 'Session mismatch (Forbidden).'; return; }");
+               sb.AppendLine("        st.innerText = 'Status: ' + (j.status || '...');");
+               sb.AppendLine("        setTimeout(poll, 2000);");
+               sb.AppendLine("      })");
+               sb.AppendLine("      .catch(function(){ setTimeout(poll, 2500); });");
+               sb.AppendLine("  }");
+               sb.AppendLine("  poll();");
+               sb.AppendLine("})();");
+               sb.AppendLine("</script>");
+
+               sb.AppendLine("</body>");
+               sb.AppendLine("</html>");
+
+               Response.Write(sb.ToString());
+               HttpContext.Current.ApplicationInstance.CompleteRequest();
+          }
+
+          /* =================== WORKER: kick + execute =================== */
+
+          private void TryKickWorkerFromDb(string cs, Guid jobId)
+          {
+               // Background worker runs inside IIS, but job state is in DB.
+               // If app pool recycles, next poll will call TryKickWorkerFromDb again.
+               System.Web.Hosting.HostingEnvironment.QueueBackgroundWorkItem(ct =>
+               {
+                    RunJobWorker(cs, jobId);
+               });
+          }
+
+          private void RunJobWorker(string cs, Guid jobId)
+          {
+               var workerId = Guid.NewGuid();
+
+               // try claim
+               bool claimed = false;
+               try
+               {
+                    claimed = DbTryClaimJob(cs, jobId, workerId, PDF_STALE_MINUTES);
+                    if (!claimed) return; // someone else is running it
+               }
+               catch (Exception ex)
+               {
+                    TraceLog($"PDFJOB claim failed | job={jobId}", ex, stage: "PDFJOB");
+                    return;
+               }
+
+               System.Threading.Timer hbTimer = null;
+               try
+               {
+                    // heartbeat timer (so long renders do not become "stale")
+                    hbTimer = new System.Threading.Timer(_ =>
+                    {
+                         try { DbHeartbeat(cs, jobId); } catch { }
+                    }, null, TimeSpan.FromSeconds(PDF_HEARTBEAT_SECONDS), TimeSpan.FromSeconds(PDF_HEARTBEAT_SECONDS));
+
+                    var job = DbGetJob(cs, jobId);
+                    if (string.IsNullOrWhiteSpace(job.SpName) || string.IsNullOrWhiteSpace(job.RdlcPath))
+                         throw new InvalidOperationException("Job missing SP or RDLC path.");
+
+                    var bag = DeserializeBag(job.ParamJson);
+
+                    // 1) execute SP
+                    var ds = ExecStoredProcWithParams_Static(cs, job.SpName, bag);
+
+                    // 2) build LocalReport (no ReportViewer)
+                    var lr = BuildLocalReportForJob(job.RdlcPath, ds, bag, forExcel: false);
+
+                    // 3) render to file
+                    var pdfPath = RenderPdfToFile(lr, job.DeviceInfo, jobId.ToString("N"));
+
+                    // 4) update DB
+                    DbCompleteJob(cs, jobId, pdfPath);
+               }
+               catch (Exception ex)
+               {
+                    var root = ex;
+                    while (root.InnerException != null) root = root.InnerException;
+                    DbFailJob(cs, jobId, root.Message);
+                    TraceLog($"PDFJOB failed | job={jobId}", root, stage: "PDFJOB");
+               }
+               finally
+               {
+                    try { hbTimer?.Dispose(); } catch { }
+               }
+          }
+
+          /* =================== STATIC HELPERS (no HttpContext required) =================== */
+
+          private static DataSet ExecStoredProcWithParams_Static(string cs, string spName, IDictionary<string, object> bag)
+          {
+               var ds = new DataSet();
+
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(spName, con) { CommandType = CommandType.StoredProcedure })
+               {
+                    bool derived = false;
+                    try
+                    {
+                         con.Open();
+                         SqlCommandBuilder.DeriveParameters(cmd);
+                         derived = true;
+                    }
+                    catch { }
+                    finally
+                    {
+                         if (con.State == ConnectionState.Open) con.Close();
+                    }
+
+                    if (derived)
+                    {
+                         foreach (SqlParameter p in cmd.Parameters)
+                         {
+                              if (p.Direction == ParameterDirection.ReturnValue) continue;
+                              if (bag != null && bag.TryGetValue(p.ParameterName, out var val))
+                                   p.Value = val ?? DBNull.Value;
+                              else
+                                   p.Value = DBNull.Value;
+                         }
+                    }
+                    else
+                    {
+                         if (bag != null)
+                              foreach (var kv in bag)
+                                   cmd.Parameters.AddWithValue(kv.Key, kv.Value ?? DBNull.Value);
+                    }
+
+                    using (var da = new SqlDataAdapter(cmd))
+                         da.Fill(ds);
+               }
+
+               return ds;
+          }
+
+          private static LocalReport BuildLocalReportForJob(string rdlcVirtualPath, DataSet spResult, IDictionary<string, object> bag, bool forExcel)
+          {
+               if (spResult == null || spResult.Tables.Count == 0)
+                    throw new InvalidOperationException("Stored proc returned no result sets.");
+
+               var rdlcPath = System.Web.Hosting.HostingEnvironment.MapPath(NormalizeRdlcPath(rdlcVirtualPath));
+               var xml = File.ReadAllText(rdlcPath);
+
+               if (forExcel)
+               {
+                    xml = Regex.Replace(
+                        xml,
+                        @"<BackgroundColor>\s*(White|#FFFFFF|RGB\(\s*255\s*,\s*255\s*,\s*255\s*\))\s*</BackgroundColor>",
+                        "<BackgroundColor>Transparent</BackgroundColor>",
+                        RegexOptions.IgnoreCase
+                    );
+               }
+
+               var lr = new LocalReport();
+               using (var sr = new StringReader(xml))
+                    lr.LoadReportDefinition(sr);
+
+               lr.EnableHyperlinks = true;
+               lr.DataSources.Clear();
+
+               var x = XDocument.Parse(xml);
+               var ns = x.Root.Name.Namespace;
+
+               var rdlcDs = x.Descendants(ns + "DataSet")
+                   .Select(ds => new
+                   {
+                        Name = (string)ds.Attribute("Name"),
+                        Fields = ds.Descendants(ns + "Field")
+                                  .Select(f => (string)f.Attribute("Name"))
+                                  .Where(n => !string.IsNullOrWhiteSpace(n))
+                                  .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                   })
+                   .Where(d => !string.IsNullOrWhiteSpace(d.Name))
+                   .ToList();
+
+               foreach (var dsDef in rdlcDs)
+               {
+                    DataTable chosen = null;
+                    int best = -1;
+
+                    foreach (DataTable t in spResult.Tables)
+                    {
+                         if (!string.IsNullOrWhiteSpace(t.TableName) &&
+                             string.Equals(t.TableName, dsDef.Name, StringComparison.OrdinalIgnoreCase))
+                         {
+                              chosen = t; best = int.MaxValue; break;
+                         }
+                    }
+
+                    if (chosen == null)
+                    {
+                         foreach (DataTable t in spResult.Tables)
+                         {
+                              int score = 0;
+                              foreach (DataColumn c in t.Columns)
+                                   if (dsDef.Fields.Contains(c.ColumnName)) score++;
+                              if (score > best) { best = score; chosen = t; }
+                         }
+                    }
+
+                    if (chosen == null) chosen = new DataTable();
+                    lr.DataSources.Add(new ReportDataSource(dsDef.Name, chosen));
+               }
+
+               // set RDLC params from bag (fallback)
+               var rdlParams = lr.GetParameters();
+               if (rdlParams != null && rdlParams.Count > 0)
+               {
+                    var toSet = new List<ReportParameter>();
+                    foreach (var pInfo in rdlParams)
+                    {
+                         string name = pInfo.Name;
+                         string val = null;
+
+                         // bag fallback (@Name or Name)
+                         if (bag != null)
+                         {
+                              if (bag.TryGetValue("@" + name, out var o) || bag.TryGetValue(name, out o))
+                                   val = FormatForParam(o, pInfo.DataType);
+                         }
+
+                         if (string.IsNullOrWhiteSpace(val))
+                         {
+                              switch (pInfo.DataType)
+                              {
+                                   case ParameterDataType.Integer: val = "0"; break;
+                                   case ParameterDataType.Float: val = "0"; break;
+                                   case ParameterDataType.Boolean: val = "False"; break;
+                                   case ParameterDataType.DateTime: val = DateTime.Now.ToString("s", CultureInfo.InvariantCulture); break;
+                                   default: val = ""; break;
+                              }
+                         }
+
+                         toSet.Add(new ReportParameter(name, val));
+                    }
+                    lr.SetParameters(toSet);
+               }
+
+               lr.Refresh();
+               return lr;
+          }
+
+          private static string RenderPdfToFile(LocalReport report, string deviceInfoXml, string jobKey)
+          {
+               string tmpDir = System.Web.Hosting.HostingEnvironment.MapPath("~/App_Data/tmp_reports");
+               Directory.CreateDirectory(tmpDir);
+
+               // optional file cleanup
+               try
+               {
+                    foreach (var f in Directory.EnumerateFiles(tmpDir, "job_*.*"))
+                         if (File.GetCreationTimeUtc(f) < DateTime.UtcNow.AddHours(-PDF_JOB_EXPIRE_HOURS)) File.Delete(f);
+               }
+               catch { }
+
+               string baseName = "job_" + jobKey;
+               var created = new List<string>();
+               var open = new List<Stream>();
+               Warning[] warnings;
+
+               try
+               {
+                    int idx = 0;
+                    Stream CreateStream(string name, string ext, Encoding enc, string mt, bool willSeek)
+                    {
+                         idx++;
+                         string e = string.IsNullOrWhiteSpace(ext) ? "pdf" : ext.TrimStart('.');
+                         string part = string.IsNullOrWhiteSpace(name) ? "main" : Regex.Replace(name, @"[^\w\-]+", "_");
+                         string path = Path.Combine(tmpDir, $"{baseName}_{part}_{idx:D3}.{e}");
+                         created.Add(path);
+
+                         var fs = new FileStream(path, FileMode.Create, FileAccess.Write,
+                             FileShare.ReadWrite | FileShare.Delete,
+                             bufferSize: 1024 * 1024,
+                             options: FileOptions.SequentialScan);
+
+                         open.Add(fs);
+                         return fs;
+                    }
+
+                    report.Render("PDF", deviceInfoXml ?? "", CreateStream, out warnings);
+               }
+               finally
+               {
+                    foreach (var s in open) { try { s.Dispose(); } catch { } }
+                    try { report.DataSources.Clear(); } catch { }
+                    try { report.ReleaseSandboxAppDomain(); } catch { }
+               }
+
+               var pdfPath = created
+                   .Where(f => f.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+                   .OrderByDescending(f => new FileInfo(f).Length)
+                   .FirstOrDefault();
+
+               if (string.IsNullOrWhiteSpace(pdfPath) || !File.Exists(pdfPath))
+                    throw new InvalidOperationException("PDF not created.");
+
+               return pdfPath;
+          }
+
+          #endregion
+
      }
 
 }
