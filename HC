@@ -1,28 +1,17 @@
-CREATE PROCEDURE sp_GetHotelExportReports_RDLC
-    @Runtime DATETIME
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    DECLARE @HasBlankConfirmation BIT = 0;
-
-    SELECT TOP (1)
-        @HasBlankConfirmation = 1
-    FROM [ICM_Report_Exports_Core_22Dec].[dbo].[HOTEL_EXPORT_REPORTS] AS HER
-    LEFT JOIN dbo.RoomingHotelConfirmation AS RHC
-        ON RHC.RSNNO = HER.RSNNO
-       AND RHC.RunTime = @Runtime
-    WHERE HER.EXDT_RUNTIME = @Runtime
-      AND (
-            HER.EXC_REPORT_TYPE = 'A'
-         OR HER.EXC_REPORT_TYPE = 'C'
-         OR HER.EXC_REPORT_TYPE = 'X'
-      )
-      AND (
-      RHC.ConfirmationText IS NULL
-	  OR LTRIM(RTRIM(RHC.ConfirmationText)) = ''
-	  );
-
-    SELECT @HasBlankConfirmation AS HasBlankConfirmation;
-END
-GO
+INSERT INTO dbo.rsREPORTS (USNNO, RMNNO)
+    SELECT
+        u.USNNO,
+        v.RMNNO
+    FROM dbo.USERINFO u
+    CROSS JOIN (VALUES
+        (908)
+    ) v(RMNNO)
+    WHERE
+        u.USNNO NOT IN (44, 94)
+        AND NOT EXISTS
+        (
+            SELECT 1
+            FROM dbo.rsREPORTS rr
+            WHERE rr.USNNO = u.USNNO
+              AND rr.RMNNO = v.RMNNO
+        );
