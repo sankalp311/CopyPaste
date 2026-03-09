@@ -1,26 +1,104 @@
-CREATE PROCEDURE sp_GetHotelExportReports_RDLC
-    @Runtime DATETIME
-AS
-BEGIN
-    SET NOCOUNT ON;
-    
-    SELECT 
-        HER.RSNNO,
-        ISNULL(RHC.ConfirmationText, '') AS Confirmation
-    FROM [ICM_Report_Exports_Core_22Dec].[dbo].[HOTEL_EXPORT_REPORTS] AS HER
-    LEFT JOIN RoomingHotelConfirmation RHC 
-        ON RHC.RSNNO = HER.RSNNO 
-        AND RHC.RunTime = @Runtime
-    WHERE 
-        HER.EXDT_RUNTIME = @Runtime 
-        AND HER.EXC_REPORT_TYPE IN ('A', 'C', 'X') -- Using IN clause for multiple values
-    ORDER BY HER.RSNNO DESC;
-END
+    private void ProcessRequest()
+          {
+               string emnno = QS("EMNNO");
+               string htnno = QS("HTNNO");
+               string runTimeStr = QS("RunTime");
 
+               bool reportEmail = IsYes(QS("ReportEmail"));
 
+               // Recipient (recommended via querystring)
+               // Example: &ToEmail=brent@travelingteams.com
+               string toEmail = QS("ToEmail");
+               if (string.IsNullOrWhiteSpace(toEmail)) toEmail = QS("Email");
 
-in this sp i need to return Ture or false 
-we need to check if this select has RHC.ConfirmationText this value blank or null atleast one time then return true 
-ANd if all rows have this RHC.ConfirmationText have this value then false.
-And do not use inclause or exists here HER.EXC_REPORT_TYPE IN ('A', 'C', 'X')
-write the very fast and optimized sp
+               DateTime runTime;
+               bool hasRunTime = DateTime.TryParse(runTimeStr, out runTime);
+
+               DataSet ds = GetDataFromSp(
+                   emnno: emnno,
+                   htnno: htnno,
+                   runTime: hasRunTime ? (DateTime?)runTime : null
+               );
+
+               DataTable t0 = (ds.Tables.Count > 0) ? ds.Tables[0] : new DataTable(); // RoomList
+               DataTable t1 = (ds.Tables.Count > 1) ? ds.Tables[1] : new DataTable(); // ChangeLog
+               DataTable t2 = (ds.Tables.Count > 2) ? ds.Tables[2] : new DataTable(); // Accepted(Header)
+
+               t0.TableName = DS_ROOMLIST;
+               t1.TableName = DS_CHANGELOG;
+               t2.TableName = DS_HEADER;
+
+               // If ToEmail is not passed, try from Accepted dataset
+               if (reportEmail && string.IsNullOrWhiteSpace(toEmail))
+                    toEmail = TryGetEmailFromAccepted(t2);
+
+               string rdlcPath = Server.MapPath(REPORT_PATH);
+               if (string.IsNullOrWhiteSpace(rdlcPath) || !System.IO.File.Exists(rdlcPath))
+                    throw new Exception("RDLC file not found at: " + REPORT_PATH);
+
+               LocalReport report = new LocalReport { ReportPath = rdlcPath };
+               report.DataSources.Clear();
+
+               // Main dataset
+               report.DataSources.Add(new ReportDataSource(DS_ROOMLIST, t0));
+
+               // Alias dataset to avoid internal query if RDLC references "HC"
+               report.DataSources.Add(new ReportDataSource("HC", t0));
+
+               // Other datasets
+               report.DataSources.Add(new ReportDataSource(DS_CHANGELOG, t1));
+               report.DataSources.Add(new ReportDataSource(DS_HEADER, t2)); // "Accepted" only once ✅
+
+               string deviceInfo = @"<DeviceInfo>
+                 <OutputFormat>PDF</OutputFormat>
+                 <PageWidth>10in</PageWidth>
+                 <MarginTop>0.25in</MarginTop>
+                 <MarginLeft>0.25in</MarginLeft>
+                 <MarginRight>0.25in</MarginRight>
+                 <MarginBottom>0.25in</MarginBottom>
+               </DeviceInfo>";
+
+               string mimeType, encoding, extension;
+               Warning[] warnings;
+               string[] streams;
+
+               byte[] pdfBytes = report.Render(
+                   "PDF",
+                   deviceInfo,
+                   out mimeType,
+                   out encoding,
+                   out extension,
+                   out streams,
+                   out warnings
+               );
+
+               // ✅ EMAIL MODE (ReportEmail=Yes)
+               if (reportEmail)
+               {
+                    if (string.IsNullOrWhiteSpace(toEmail))
+                         throw new Exception("ReportEmail=Yes but recipient email not found. Pass &ToEmail=someone@domain.com OR ensure it exists in Accepted dataset.");
+
+                    string subject = "Hotel Confirmation - Room List Accepted";
+                    string bodyHtml = BuildEmailTemplateHtml();
+
+                    SendEmailWithPdf(toEmail.Trim(), subject, bodyHtml, pdfBytes, "HotelConfirmation.pdf");
+
+                    Response.Clear();
+                    Response.ContentType = "text/plain";
+                    Response.Cache.SetCacheability(HttpCacheability.NoCache);
+                    Response.Write("OK: Email sent");
+                    Response.Flush();
+                    Context.ApplicationInstance.CompleteRequest();
+                    return;
+               }
+
+               // ✅ DOWNLOAD MODE
+               Response.Clear();
+               Response.Buffer = true;
+               Response.ContentType = "application/pdf";
+               Response.AddHeader("Content-Disposition", "attachment; filename=HotelConfirmation.pdf");
+               Response.Cache.SetCacheability(HttpCacheability.NoCache);
+               Response.BinaryWrite(pdfBytes);
+               Response.Flush();
+               Context.ApplicationInstance.CompleteRequest();
+          }
