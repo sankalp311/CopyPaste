@@ -1,71 +1,26 @@
-private void WriteDbLoaderHtml(Guid jobId)
-{
-    string baseUrl = ResolveUrl(Request.Url.AbsolutePath);
+CREATE PROCEDURE sp_GetHotelExportReports_RDLC
+    @Runtime DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
+    
+    SELECT 
+        HER.RSNNO,
+        ISNULL(RHC.ConfirmationText, '') AS Confirmation
+    FROM [ICM_Report_Exports_Core_22Dec].[dbo].[HOTEL_EXPORT_REPORTS] AS HER
+    LEFT JOIN RoomingHotelConfirmation RHC 
+        ON RHC.RSNNO = HER.RSNNO 
+        AND RHC.RunTime = @Runtime
+    WHERE 
+        HER.EXDT_RUNTIME = @Runtime 
+        AND HER.EXC_REPORT_TYPE IN ('A', 'C', 'X') -- Using IN clause for multiple values
+    ORDER BY HER.RSNNO DESC;
+END
 
-    // Always use sessionid for status/download (avoid token re-resolve)
-    string session = (Q("sessionid") ?? "").Trim();
 
-    string statusUrl = $"{baseUrl}?mode=status&id={jobId}&sessionid={HttpUtility.UrlEncode(session)}";
-    string downloadUrl = $"{baseUrl}?mode=download&id={jobId}&sessionid={HttpUtility.UrlEncode(session)}";
 
-    string jsStatusUrl = HttpUtility.JavaScriptStringEncode(statusUrl);
-    string jsDownloadUrl = HttpUtility.JavaScriptStringEncode(downloadUrl);
-
-    Response.Clear();
-    Response.TrySkipIisCustomErrors = true;
-    Response.Cache.SetCacheability(HttpCacheability.NoCache);
-    Response.Cache.SetNoStore();
-    Response.ContentType = "text/html";
-
-    var sb = new StringBuilder();
-
-    sb.AppendLine("<!doctype html>");
-    sb.AppendLine("<html>");
-    sb.AppendLine("<head>");
-    sb.AppendLine("<meta charset='utf-8' />");
-    sb.AppendLine("<title>Generating PDF…</title>");
-    sb.AppendLine("<style>");
-    sb.AppendLine(" body{font-family:Arial;padding:24px}");
-    sb.AppendLine(" .box{max-width:560px;margin:60px auto;border:1px solid #ddd;border-radius:10px;padding:22px}");
-    sb.AppendLine(" .spin{width:28px;height:28px;border:3px solid #ddd;border-top-color:#2d6cdf;border-radius:50%;animation:rot 1s linear infinite;display:inline-block;vertical-align:middle;margin-right:10px}");
-    sb.AppendLine(" @keyframes rot{to{transform:rotate(360deg)}}");
-    sb.AppendLine(" .msg{font-size:14px;color:#444;margin-top:12px}");
-    sb.AppendLine("</style>");
-    sb.AppendLine("</head>");
-    sb.AppendLine("<body>");
-    sb.AppendLine(" <div class='box'>");
-    sb.AppendLine("  <div><span class='spin'></span><b>Generating your PDF…</b></div>");
-    sb.AppendLine("  <div class='msg'>This page will automatically open the PDF when it’s ready.</div>");
-    sb.AppendLine("  <div class='msg' id='st'>Starting…</div>");
-    sb.AppendLine(" </div>");
-
-    sb.AppendLine("<script>");
-    sb.AppendLine("(function(){");
-    sb.AppendLine($"  var statusUrl = \"{jsStatusUrl}\";");
-    sb.AppendLine($"  var downloadUrl = \"{jsDownloadUrl}\";");
-    sb.AppendLine("  var st = document.getElementById('st');");
-    sb.AppendLine("  function poll(){");
-    sb.AppendLine("    fetch(statusUrl, { credentials:'include', cache:'no-store' })");
-    sb.AppendLine("      .then(function(r){ return r.json(); })");
-    sb.AppendLine("      .then(function(j){");
-    sb.AppendLine("        if(j.status === 'Completed'){ window.location = downloadUrl; return; }");
-    sb.AppendLine("        if(j.status === 'Failed'){ st.innerText = 'Failed: ' + (j.error || 'Unknown error'); return; }");
-    sb.AppendLine("        if(j.status === 'Forbidden'){ st.innerText = 'Session mismatch (Forbidden).'; return; }");
-    sb.AppendLine("        st.innerText = 'Status: ' + (j.status || '...');");
-    sb.AppendLine("        setTimeout(poll, 1200);");
-    sb.AppendLine("      })");
-    sb.AppendLine("      .catch(function(e){");
-    sb.AppendLine("        st.innerText = 'Waiting for server…';");
-    sb.AppendLine("        setTimeout(poll, 2000);");
-    sb.AppendLine("      });");
-    sb.AppendLine("  }");
-    sb.AppendLine("  poll();");
-    sb.AppendLine("})();");
-    sb.AppendLine("</script>");
-
-    sb.AppendLine("</body>");
-    sb.AppendLine("</html>");
-
-    Response.Write(sb.ToString());
-    HttpContext.Current.ApplicationInstance.CompleteRequest();
-}
+in this sp i need to return Ture or false 
+we need to check if this select has RHC.ConfirmationText this value blank or null atleast one time then return true 
+ANd if all rows have this RHC.ConfirmationText have this value then false.
+And do not use inclause or exists here HER.EXC_REPORT_TYPE IN ('A', 'C', 'X')
+write the very fast and optimized sp
