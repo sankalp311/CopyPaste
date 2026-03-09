@@ -1,105 +1,28 @@
-CREATE OR ALTER PROCEDURE [dbo].[sp_GetActive112Records]      
-    @EMCNO VARCHAR(50)      
-AS    
-BEGIN    
-    SET NOCOUNT ON;      
-    SET ANSI_WARNINGS OFF;      
-    SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;      
+CREATE PROCEDURE sp_GetHotelExportReports_RDLC
+    @Runtime DATETIME
+AS
+BEGIN
+    SET NOCOUNT ON;
 
-    DECLARE 
-        @EMNNO INT,
-        @RGDTADD_FROM DATETIME,
-        @RGDTADD_TO DATETIME,
-        @CMNNO INT = 2,
-        @EncryptKey VARCHAR(500) = 'ILME5fgPicoqFOik+8amMQ==';
+    DECLARE @HasBlankConfirmation BIT = 0;
 
-    -----------------------------------------------------
-    -- Get EMNNO from EVENTS using EMCNO
-    -----------------------------------------------------
-    SELECT @EMNNO = EMNNO
-    FROM EVENTS
-    WHERE EMCNO = @EMCNO;
+    SELECT TOP (1)
+        @HasBlankConfirmation = 1
+    FROM [ICM_Report_Exports_Core_22Dec].[dbo].[HOTEL_EXPORT_REPORTS] AS HER
+    LEFT JOIN dbo.RoomingHotelConfirmation AS RHC
+        ON RHC.RSNNO = HER.RSNNO
+       AND RHC.RunTime = @Runtime
+    WHERE HER.EXDT_RUNTIME = @Runtime
+      AND (
+            HER.EXC_REPORT_TYPE = 'A'
+         OR HER.EXC_REPORT_TYPE = 'C'
+         OR HER.EXC_REPORT_TYPE = 'X'
+      )
+      AND (
+      RHC.ConfirmationText IS NULL
+	  OR LTRIM(RTRIM(RHC.ConfirmationText)) = ''
+	  );
 
-    -----------------------------------------------------
-    -- Get From/To date range from export history
-    -----------------------------------------------------
-    SELECT TOP 1
-        @RGDTADD_FROM = HHDT_FROM,
-        @RGDTADD_TO   = HHDT_TO
-    FROM HOTEL_REPORT_EXPORT_HISTORY
-    WHERE EXC_HTNNO IS NOT NULL
-    ORDER BY HHDT_RUNTIME DESC;
-
-    -----------------------------------------------------
-    -- Main Query
-    -----------------------------------------------------
-    SELECT      
-        REGMST.RGCPLNM,    --LAST NAME
-        REGMST.RGCPFNM,    -- FIRST NAME
-        REGMST.RGCPORG,   --ORGANIZATION 
-        ROOMCATEGORIES.RCCDESC,    --RoomCategory
-        RES.RSDTARR,    --Arrival time
-        RES.RSDTDEP,    -- Departure time
-        RES.RSCREQUESTSTRING,   --REQ 
-        RES.RSCCCTYPE,   --CCType 
-        RES.RSCPERSONCOMMENTS,    --REQ
-        RES.RSCHOTELCOMMENTS,    --Req   
-		dbo.udf_blowfishdecrypt(RES.RSCCCNO, 'ILME5fgPicoqFOik+8amMQ==') AS RSCCCNO,  --CC#
-        dbo.udf_blowfishdecrypt(RES.RSCCCEXP, @EncryptKey) AS RSCCCEXP,   --CCEXP 
-		HOTEL.HTCDSC	AS HOTELNAME, --HOTEL NAME
-		REGMST.RGCEMAIL	AS EMAIL, --EMAIL
-		REGMST.RGCPTEL AS PHONE, --PHONE NUMNER
-		RES.RSDTBOOKINGMADE AS RUNTIME, --RUNTIME 
-		ISNULL(RLN.RoomListNote,'') AS RoomListNote,
-		ISNULL(RLN.RoomListNoteCreatedBy,'') AS RoomListNoteCreatedBy,
-		ISNULL(RLN.Email,'') AS Email,
-
-		ISNULL(CONVERT(varchar(30),
-			   FORMAT(RLN.CreatedDate,'MM/dd/yyyy hh:mm:ss tt')
-		),'') AS RoomListNoteCreatedDate
-		
-    FROM EVENTS    
-    INNER JOIN REGMST WITH (NOLOCK) 
-        ON EVENTS.EMNNO = REGMST.EMNNO    
-
-    LEFT JOIN REGUSER WITH (NOLOCK) 
-        ON REGMST.RGNNO = REGUSER.RGNNO    
-
-    INNER JOIN CATEGORY 
-        ON REGMST.CMNNO = CATEGORY.CMNNO    
-
-    INNER JOIN RESERVATIONS RES WITH (NOLOCK) 
-        ON REGMST.RGNNO = RES.RGNNO    
-
-    LEFT JOIN ACTMST WITH (NOLOCK) 
-        ON RES.RSNNO = ACTMST.RSNNO    
-
-    LEFT JOIN HOTELROOMBLOCKS 
-        ON RES.HBNNO = HOTELROOMBLOCKS.HBNNO    
-
-    LEFT JOIN RESNIGHTS 
-        ON RES.RSNNO = RESNIGHTS.RSNNO    
-
-    INNER JOIN HOTEL 
-        ON RES.HTNNO = HOTEL.HTNNO    
-
-    INNER JOIN ROOMCATEGORIES 
-        ON RES.RCNNO = ROOMCATEGORIES.RCNNO    
-
-    INNER JOIN ROOMTYPES 
-        ON RES.RTNNO = ROOMTYPES.RTNNO    
-
-    LEFT JOIN AFFILIATE2 
-        ON REGUSER.RUCREPRESENTING = AFFILIATE2.AF2CNO 
-
-    LEFT JOIN RoomingListNotes RLN
-        ON RLN.EMNNO = EVENTS.EMNNO
-       AND RLN.HTNNO = RES.HTNNO
-
-    WHERE EVENTS.EMNNO = @EMNNO
-      AND CATEGORY.CMNNO = @CMNNO
-      AND RES.RSDTBOOKINGMADE BETWEEN @RGDTADD_FROM AND @RGDTADD_TO
-      AND RES.RSDTXLD IS NULL
-
-    ORDER BY EVENTS.EMNNO, RGCPLNM, RGCPFNM;
+    SELECT @HasBlankConfirmation AS HasBlankConfirmation;
 END
+GO
