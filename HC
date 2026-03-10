@@ -1,9 +1,175 @@
-	DataSet data = ExecStoredProcWithParams(cs, meta.SpName, bag);
-	
-	after this code i want to check one new column in boolean value (column name be like bypassRDLCFlag like that) REPORT_SP_MAP from this table
-	And if one then import that dataset into excel with same excell datatype with same format and order you just direct download that dataset into excel very fastly.
-	
-	 if (v == "E")
+protected void btnContinue_Click(object sender, EventArgs e)
+          {
+               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
+               string rptId = (Q("RptId") ?? "").Trim();
+               string v = (Q("V") ?? "").Trim().ToUpperInvariant();
+               string session = (Q("sessionid") ?? "").Trim();
+
+               TraceLog($"ENTER btnContinue_Click | RptId={rptId} | V={v}", stage: "ENTER");
+
+               var meta = GetReportMeta(cs, rptId);
+               if (string.IsNullOrWhiteSpace(meta.SpName))
+               {
+                    WriteAndEnd("No SP mapping found for this report.");
+                    return;
+               }
+
+               // ---------- collect fixed filters ----------
+               string emnno = (Convert.ToString(Session["LoginEmnno"] ?? "")).Trim();
+
+
+               int? cmnno = ParseNullableInt(Request.Form["CMNNO"]);   // Category
+               if (cmnno == 0) cmnno = null;
+
+               int? htnno = ParseNullableInt(Request.Form["HTNNO"]);   // Hotel
+               if (htnno == 0) htnno = null;
+
+               string eventcode = (Convert.ToString(Request.Form["EventCode"] ?? "")).Trim();
+
+               // ============================================================
+               // 1) RESOLVE DATE RANGE - ALWAYS FROM THE OPTIONAL CHOICES FORM
+               // ============================================================
+
+               // raw strings coming from the posted form
+               string fromRaw = null;
+               string toRaw = null;
+
+               // a) if you explicitly named your inputs "from" / "to"
+               fromRaw = Request.Form["from"] ?? Request.Form["From"];
+               toRaw = Request.Form["to"] ?? Request.Form["To"];
+
+
+               // b) classic Crystal-style param1 / param2 (your URL Filter has DateTime(param1), DateTime(param2))
+               if (string.IsNullOrWhiteSpace(fromRaw))
+                    fromRaw = Request.Form["param1"];
+
+               if (string.IsNullOrWhiteSpace(toRaw))
+                    toRaw = Request.Form["param2"];
+
+               // c) last-resort: try to find any form keys that look like "from" / "to"
+               if (string.IsNullOrWhiteSpace(fromRaw) || string.IsNullOrWhiteSpace(toRaw))
+               {
+                    foreach (string key in Request.Form.AllKeys)
+                    {
+                         if (string.IsNullOrEmpty(key)) continue;
+
+                         // try to catch things like ctl00$MainContent$txtFromDate
+                         if (string.IsNullOrWhiteSpace(fromRaw) &&
+                             key.IndexOf("from", StringComparison.OrdinalIgnoreCase) >= 0)
+                         {
+                              fromRaw = Request.Form[key];
+                         }
+
+                         if (string.IsNullOrWhiteSpace(toRaw) &&
+                             key.IndexOf("to", StringComparison.OrdinalIgnoreCase) >= 0 &&
+                             !key.Contains("__VIEWSTATE") &&
+                             !key.Contains("__EVENT"))
+                         {
+                              toRaw = Request.Form[key];
+                         }
+
+                         if (!string.IsNullOrWhiteSpace(fromRaw) && !string.IsNullOrWhiteSpace(toRaw))
+                              break;
+                    }
+               }
+
+               // d) convert to DateTime? using your helper
+               DateTime? from = ParseNullableDateTimeLocal(fromRaw);
+               DateTime? to = ParseNullableDateTimeLocal(toRaw);
+
+               if (!from.HasValue)
+                    from = ParseNullableDateTimeLocal(Q("from"));
+               if (!to.HasValue)
+                    to = ParseNullableDateTimeLocal(Q("to"));
+
+               // e) extra fallback: if the form was somehow empty, allow ?from=&to= on URL
+               if (!from.HasValue)
+                    from = ParseNullableDateTimeLocal(Request.QueryString["from"]);
+
+               if (!to.HasValue)
+                    to = ParseNullableDateTimeLocal(Request.QueryString["to"]);
+
+               // f) safety: make sure From <= To
+               if (from.HasValue && to.HasValue && from.Value > to.Value)
+               {
+                    var tmp = from;
+                    from = to;
+                    to = tmp;
+               }
+
+               TraceLog($"btnContinue_Click | FINAL DATES | From={from} | To={to}", stage: "DATES");
+
+               // ============================================================
+               // 2) BUILD PARAMETER BAG FOR SP
+               // ============================================================
+
+               var bag = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+
+               if (!string.IsNullOrWhiteSpace(emnno))
+                    bag["@EMNNO"] = emnno;
+
+               if (!bag.ContainsKey("@EMCNO"))
+               {
+                    var emcno = GetEmcnoByEmnno(cs, emnno);
+                    if (!string.IsNullOrWhiteSpace(emcno))
+                         bag["@EMCNO"] = emcno;
+               }
+
+               if (!string.IsNullOrWhiteSpace(session))
+                    bag["@SessionID"] = session;
+
+               if (cmnno.HasValue) bag["@CMNNO"] = cmnno.Value;
+               if (htnno.HasValue) bag["@HTNNO"] = htnno.Value;
+
+               // pass the unified date range to SP; different SPs can use any subset
+               if (from.HasValue)
+               {
+                    bag["@From"] = from.Value;
+               }
+               else if (from.HasValue)  // This will never execute because first condition was true
+               {
+                    bag["@RGDTADD_FROM"] = from.Value;
+               }
+
+               if (to.HasValue)
+               {
+                    bag["@To"] = to.Value;
+               }
+               else if (to.HasValue)  // This will never execute because first condition was true
+               {
+                    bag["@RGDTADD_TO"] = to.Value;
+               }
+
+               if (!string.IsNullOrWhiteSpace(eventcode))
+			{
+				bag["@EventCode"] = eventcode;
+			}
+
+			// ============================================================
+			// 3) EXECUTE SP + BIND REPORT
+			// ============================================================
+
+			DataSet data = ExecStoredProcWithParams(cs, meta.SpName, bag);
+
+               string rdlcVirtual = string.IsNullOrWhiteSpace(meta.RdlcPath)
+                   ? FALLBACK_RDLC
+                   : meta.RdlcPath;
+
+               var dsNames = GetDatasetNamesFromDb(cs, rptId);
+               if (dsNames.Count == 0)
+               {
+                    var inferred = GetRdlcDataSetNames(Server.MapPath(rdlcVirtual));
+                    dsNames = inferred.Count > 0 ? inferred : new List<string> { FALLBACK_DS };
+               }
+
+               // BindToReportAuto(rdlcVirtual, data);
+
+               // ============================================================
+               // 4) OUTPUT MODE (Excel / PDF / viewer)
+               // ============================================================
+               bool forExcel = true;
+
+               if (v == "E")
                {
 
                     BindToReportAuto(rdlcVirtual, data, forExcel: true);
@@ -12,7 +178,31 @@
                     TraceLog("EXIT btnContinue_Click (Excel path)", stage: "EXIT");
                     return;
                }
-			   
-			   call excel download method here with bypass flag.
-			   C# code
-			   
+               else if (v == "P")
+               {
+                    string pageWidth = string.IsNullOrWhiteSpace(meta.PageWidth) ? "14in" : meta.PageWidth;
+                    string pageHeight = string.IsNullOrWhiteSpace(meta.PageHeight) ? "11.69in" : meta.PageHeight;
+                    BindToReportAuto(rdlcVirtual, data, forExcel: false);
+
+                    string deviceInfo = $@"<DeviceInfo>
+  <OutputFormat>PDF</OutputFormat>
+  <PageWidth>{pageWidth}</PageWidth>
+  <PageHeight>{pageHeight}</PageHeight>
+  <MarginTop>0.25in</MarginTop>
+  <MarginLeft>0.25in</MarginLeft>
+  <MarginRight>0.25in</MarginRight>
+  <MarginBottom>0.25in</MarginBottom>
+</DeviceInfo>";
+                   // RenderHugePdf_NoLock(rv.LocalReport, deviceInfo, "Report.pdf", inline: true);
+                    //RenderToHttp("PDF", "application/pdf", "Report.pdf", deviceInfo, forceDownloadForPdf: false);
+                    RenderHugePdf_Safe(rv.LocalReport, deviceInfo, "Report.pdf", inline: true);
+                    return;
+               }
+               else
+               {
+                    pnlFilters.Visible = false;
+                    pnlViewer.Visible = true;  // in-page preview
+               }
+
+               TraceLog("EXIT btnContinue_Click", stage: "EXIT");
+          }
