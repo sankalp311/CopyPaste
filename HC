@@ -1,4 +1,4 @@
-private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
+ private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
           {
                var formatMap = GetExcelColumnFormatMap(rptId);
 
@@ -26,12 +26,14 @@ private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
 
                               var ws = wb.Worksheets.Add(sheetName);
 
+                              // Header
                               for (int col = 0; col < dt.Columns.Count; col++)
                               {
                                    ws.Cell(1, col + 1).Value = dt.Columns[col].ColumnName;
                                    ws.Cell(1, col + 1).Style.Font.Bold = true;
                               }
 
+                              // Data
                               for (int row = 0; row < dt.Rows.Count; row++)
                               {
                                    for (int col = 0; col < dt.Columns.Count; col++)
@@ -40,9 +42,30 @@ private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
                                         var cell = ws.Cell(row + 2, col + 1);
                                         string columnName = dt.Columns[col].ColumnName;
 
+                                        var nullAsDefaultDateColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                                                  {
+                                                      "Date of Request",
+                                                      "Approved Date",
+                                                      "Override",
+                                                      "TeamCut-off"
+                                                  };
                                         if (value == DBNull.Value || value == null)
                                         {
-                                             cell.Value = string.Empty;
+                                             if (nullAsDefaultDateColumns.Contains(columnName))
+                                             {
+                                                  cell.Value = new DateTime(1900, 1, 1, 0, 0, 0);
+
+                                                  if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
+                                                       cell.Style.DateFormat.Format = formatMap[columnName];
+                                                  else
+                                                       cell.Style.DateFormat.Format = "M/d/yyyy  h:mm:ss AM/PM";
+                                             }
+                                             else
+                                             {
+                                                  cell.Value = string.Empty;
+                                                  cell.Style.NumberFormat.Format = "General";
+                                             }
+
                                              continue;
                                         }
 
@@ -53,7 +76,7 @@ private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
                                              DateTime dtValue = Convert.ToDateTime(value);
                                              cell.Value = dtValue;
 
-                                             if (formatMap.ContainsKey(columnName))
+                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
                                                   cell.Style.DateFormat.Format = formatMap[columnName];
                                              else
                                                   cell.Style.DateFormat.Format = "dd-MMM-yyyy HH:mm:ss";
@@ -61,6 +84,7 @@ private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
                                         else if (t == typeof(bool))
                                         {
                                              cell.Value = Convert.ToBoolean(value);
+                                             cell.Style.NumberFormat.Format = "General";
                                         }
                                         else if (t == typeof(byte) ||
                                                  t == typeof(short) ||
@@ -68,18 +92,41 @@ private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
                                                  t == typeof(long))
                                         {
                                              cell.Value = Convert.ToInt64(value);
-                                             cell.Style.NumberFormat.Format = "0";
+
+                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
+                                                  cell.Style.NumberFormat.Format = formatMap[columnName];
+                                             else
+                                                  cell.Style.NumberFormat.Format = "0";
                                         }
                                         else if (t == typeof(decimal) ||
                                                  t == typeof(double) ||
                                                  t == typeof(float))
                                         {
                                              cell.Value = Convert.ToDecimal(value);
-                                             cell.Style.NumberFormat.Format = "0.00########";
+
+                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
+                                                  cell.Style.NumberFormat.Format = formatMap[columnName];
+                                             else
+                                                  cell.Style.NumberFormat.Format = "0.00########";
+                                        }
+                                        else if (t == typeof(string) || t == typeof(char))
+                                        {
+                                             cell.Value = Convert.ToString(value);
+
+                                             // varchar/string should stay General as per your need
+                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
+                                                  cell.Style.NumberFormat.Format = formatMap[columnName];
+                                             else
+                                                  cell.Style.NumberFormat.Format = "General";
                                         }
                                         else
                                         {
                                              cell.Value = Convert.ToString(value);
+
+                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
+                                                  cell.Style.NumberFormat.Format = formatMap[columnName];
+                                             else
+                                                  cell.Style.NumberFormat.Format = "General";
                                         }
                                    }
                               }
