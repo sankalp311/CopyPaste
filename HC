@@ -1,208 +1,106 @@
-protected void btnContinue_Click(object sender, EventArgs e)
+    private void SendDataSetAsExcel(DataSet ds, string fileName)
           {
-               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
-               string rptId = (Q("RptId") ?? "").Trim();
-               string v = (Q("V") ?? "").Trim().ToUpperInvariant();
-               string session = (Q("sessionid") ?? "").Trim();
-
-               TraceLog($"ENTER btnContinue_Click | RptId={rptId} | V={v}", stage: "ENTER");
-
-               var meta = GetReportMeta(cs, rptId);
-               if (string.IsNullOrWhiteSpace(meta.SpName))
+               //using (var wb = new ClosedXML.Excel.XLWorkbook(ClosedXML.Excel.XLEventTracking.Disabled))
+               using (var wb = new XLWorkbook())
                {
-                    WriteAndEnd("No SP mapping found for this report.");
-                    return;
-               }
-
-               // ---------- collect fixed filters ----------
-               string emnno = (Convert.ToString(Session["LoginEmnno"] ?? "")).Trim();
-
-
-               int? cmnno = ParseNullableInt(Request.Form["CMNNO"]);   // Category
-               if (cmnno == 0) cmnno = null;
-
-               int? htnno = ParseNullableInt(Request.Form["HTNNO"]);   // Hotel
-               if (htnno == 0) htnno = null;
-
-               string eventcode = (Convert.ToString(Request.Form["EventCode"] ?? "")).Trim();
-
-               // ============================================================
-               // 1) RESOLVE DATE RANGE - ALWAYS FROM THE OPTIONAL CHOICES FORM
-               // ============================================================
-
-               // raw strings coming from the posted form
-               string fromRaw = null;
-               string toRaw = null;
-
-               // a) if you explicitly named your inputs "from" / "to"
-               fromRaw = Request.Form["from"] ?? Request.Form["From"];
-               toRaw = Request.Form["to"] ?? Request.Form["To"];
-
-
-               // b) classic Crystal-style param1 / param2 (your URL Filter has DateTime(param1), DateTime(param2))
-               if (string.IsNullOrWhiteSpace(fromRaw))
-                    fromRaw = Request.Form["param1"];
-
-               if (string.IsNullOrWhiteSpace(toRaw))
-                    toRaw = Request.Form["param2"];
-
-               // c) last-resort: try to find any form keys that look like "from" / "to"
-               if (string.IsNullOrWhiteSpace(fromRaw) || string.IsNullOrWhiteSpace(toRaw))
-               {
-                    foreach (string key in Request.Form.AllKeys)
+                    if (ds == null || ds.Tables.Count == 0)
                     {
-                         if (string.IsNullOrEmpty(key)) continue;
+                         var ws = wb.Worksheets.Add("Sheet1");
+                         ws.Cell(1, 1).Value = "No data found";
+                    }
+                    else
+                    {
+                         int sheetIndex = 1;
 
-                         // try to catch things like ctl00$MainContent$txtFromDate
-                         if (string.IsNullOrWhiteSpace(fromRaw) &&
-                             key.IndexOf("from", StringComparison.OrdinalIgnoreCase) >= 0)
+                         foreach (DataTable dt in ds.Tables)
                          {
-                              fromRaw = Request.Form[key];
-                         }
+                              if (dt == null) continue;
 
-                         if (string.IsNullOrWhiteSpace(toRaw) &&
-                             key.IndexOf("to", StringComparison.OrdinalIgnoreCase) >= 0 &&
-                             !key.Contains("__VIEWSTATE") &&
-                             !key.Contains("__EVENT"))
-                         {
-                              toRaw = Request.Form[key];
-                         }
+                              string sheetName = !string.IsNullOrWhiteSpace(dt.TableName)
+                                  ? SafeExcelSheetName(dt.TableName)
+                                  : "Sheet" + sheetIndex;
 
-                         if (!string.IsNullOrWhiteSpace(fromRaw) && !string.IsNullOrWhiteSpace(toRaw))
-                              break;
+                              if (wb.Worksheets.Any(x => x.Name.Equals(sheetName, StringComparison.OrdinalIgnoreCase)))
+                                   sheetName = "Sheet" + sheetIndex;
+
+                              var ws = wb.Worksheets.Add(sheetName);
+
+                              // headers
+                              for (int col = 0; col < dt.Columns.Count; col++)
+                              {
+                                   ws.Cell(1, col + 1).Value = dt.Columns[col].ColumnName;
+                                   ws.Cell(1, col + 1).Style.Font.Bold = true;
+                              }
+
+                              // data
+                              for (int row = 0; row < dt.Rows.Count; row++)
+                              {
+                                   for (int col = 0; col < dt.Columns.Count; col++)
+                                   {
+                                        object value = dt.Rows[row][col];
+                                        var cell = ws.Cell(row + 2, col + 1);
+
+                                        if (value == DBNull.Value || value == null)
+                                        {
+                                             cell.Value = string.Empty;
+                                             continue;
+                                        }
+
+                                        Type t = Nullable.GetUnderlyingType(dt.Columns[col].DataType) ?? dt.Columns[col].DataType;
+
+                                        if (t == typeof(DateTime))
+                                        {
+                                             cell.Value = Convert.ToDateTime(value);
+                                             cell.Style.DateFormat.Format = "dd-MMM-yyyy HH:mm:ss";
+                                        }
+                                        else if (t == typeof(bool))
+                                        {
+                                             cell.Value = Convert.ToBoolean(value);
+                                        }
+                                        else if (t == typeof(byte) ||
+                                                 t == typeof(short) ||
+                                                 t == typeof(int) ||
+                                                 t == typeof(long))
+                                        {
+                                             cell.Value = Convert.ToInt64(value);
+                                             cell.Style.NumberFormat.Format = "0";
+                                        }
+                                        else if (t == typeof(decimal) ||
+                                                 t == typeof(double) ||
+                                                 t == typeof(float))
+                                        {
+                                             cell.Value = Convert.ToDecimal(value);
+                                             cell.Style.NumberFormat.Format = "0.00########";
+                                        }
+                                        else
+                                        {
+                                             cell.Value = Convert.ToString(value);
+                                        }
+                                   }
+                              }
+
+                              ws.SheetView.FreezeRows(1);
+
+                              if (dt.Columns.Count > 0)
+                                   ws.Columns(1, dt.Columns.Count).AdjustToContents(1, Math.Min(dt.Rows.Count + 1, 200));
+
+                              sheetIndex++;
+                         }
+                    }
+
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                         wb.SaveAs(ms);
+                         byte[] bytes = ms.ToArray();
+
+                         Response.Clear();
+                         Response.Buffer = true;
+                         Response.Charset = "";
+                         Response.ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+                         Response.AddHeader("content-disposition", "attachment;filename=\"" + fileName + "\"");
+                         Response.BinaryWrite(bytes);
+                         Response.Flush();
+                         HttpContext.Current.ApplicationInstance.CompleteRequest();
                     }
                }
-
-               // d) convert to DateTime? using your helper
-               DateTime? from = ParseNullableDateTimeLocal(fromRaw);
-               DateTime? to = ParseNullableDateTimeLocal(toRaw);
-
-               if (!from.HasValue)
-                    from = ParseNullableDateTimeLocal(Q("from"));
-               if (!to.HasValue)
-                    to = ParseNullableDateTimeLocal(Q("to"));
-
-               // e) extra fallback: if the form was somehow empty, allow ?from=&to= on URL
-               if (!from.HasValue)
-                    from = ParseNullableDateTimeLocal(Request.QueryString["from"]);
-
-               if (!to.HasValue)
-                    to = ParseNullableDateTimeLocal(Request.QueryString["to"]);
-
-               // f) safety: make sure From <= To
-               if (from.HasValue && to.HasValue && from.Value > to.Value)
-               {
-                    var tmp = from;
-                    from = to;
-                    to = tmp;
-               }
-
-               TraceLog($"btnContinue_Click | FINAL DATES | From={from} | To={to}", stage: "DATES");
-
-               // ============================================================
-               // 2) BUILD PARAMETER BAG FOR SP
-               // ============================================================
-
-               var bag = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
-
-               if (!string.IsNullOrWhiteSpace(emnno))
-                    bag["@EMNNO"] = emnno;
-
-               if (!bag.ContainsKey("@EMCNO"))
-               {
-                    var emcno = GetEmcnoByEmnno(cs, emnno);
-                    if (!string.IsNullOrWhiteSpace(emcno))
-                         bag["@EMCNO"] = emcno;
-               }
-
-               if (!string.IsNullOrWhiteSpace(session))
-                    bag["@SessionID"] = session;
-
-               if (cmnno.HasValue) bag["@CMNNO"] = cmnno.Value;
-               if (htnno.HasValue) bag["@HTNNO"] = htnno.Value;
-
-               // pass the unified date range to SP; different SPs can use any subset
-               if (from.HasValue)
-               {
-                    bag["@From"] = from.Value;
-               }
-               else if (from.HasValue)  // This will never execute because first condition was true
-               {
-                    bag["@RGDTADD_FROM"] = from.Value;
-               }
-
-               if (to.HasValue)
-               {
-                    bag["@To"] = to.Value;
-               }
-               else if (to.HasValue)  // This will never execute because first condition was true
-               {
-                    bag["@RGDTADD_TO"] = to.Value;
-               }
-
-               if (!string.IsNullOrWhiteSpace(eventcode))
-			{
-				bag["@EventCode"] = eventcode;
-			}
-
-			// ============================================================
-			// 3) EXECUTE SP + BIND REPORT
-			// ============================================================
-
-			DataSet data = ExecStoredProcWithParams(cs, meta.SpName, bag);
-
-               string rdlcVirtual = string.IsNullOrWhiteSpace(meta.RdlcPath)
-                   ? FALLBACK_RDLC
-                   : meta.RdlcPath;
-
-               var dsNames = GetDatasetNamesFromDb(cs, rptId);
-               if (dsNames.Count == 0)
-               {
-                    var inferred = GetRdlcDataSetNames(Server.MapPath(rdlcVirtual));
-                    dsNames = inferred.Count > 0 ? inferred : new List<string> { FALLBACK_DS };
-               }
-
-               // BindToReportAuto(rdlcVirtual, data);
-
-               // ============================================================
-               // 4) OUTPUT MODE (Excel / PDF / viewer)
-               // ============================================================
-               bool forExcel = true;
-
-               if (v == "E")
-               {
-
-                    BindToReportAuto(rdlcVirtual, data, forExcel: true);
-
-                    SendExcel("Report_" + Path.GetFileNameWithoutExtension(rdlcVirtual) + ".xlsx");
-                    TraceLog("EXIT btnContinue_Click (Excel path)", stage: "EXIT");
-                    return;
-               }
-               else if (v == "P")
-               {
-                    string pageWidth = string.IsNullOrWhiteSpace(meta.PageWidth) ? "14in" : meta.PageWidth;
-                    string pageHeight = string.IsNullOrWhiteSpace(meta.PageHeight) ? "11.69in" : meta.PageHeight;
-                    BindToReportAuto(rdlcVirtual, data, forExcel: false);
-
-                    string deviceInfo = $@"<DeviceInfo>
-  <OutputFormat>PDF</OutputFormat>
-  <PageWidth>{pageWidth}</PageWidth>
-  <PageHeight>{pageHeight}</PageHeight>
-  <MarginTop>0.25in</MarginTop>
-  <MarginLeft>0.25in</MarginLeft>
-  <MarginRight>0.25in</MarginRight>
-  <MarginBottom>0.25in</MarginBottom>
-</DeviceInfo>";
-                   // RenderHugePdf_NoLock(rv.LocalReport, deviceInfo, "Report.pdf", inline: true);
-                    //RenderToHttp("PDF", "application/pdf", "Report.pdf", deviceInfo, forceDownloadForPdf: false);
-                    RenderHugePdf_Safe(rv.LocalReport, deviceInfo, "Report.pdf", inline: true);
-                    return;
-               }
-               else
-               {
-                    pnlFilters.Visible = false;
-                    pnlViewer.Visible = true;  // in-page preview
-               }
-
-               TraceLog("EXIT btnContinue_Click", stage: "EXIT");
           }
