@@ -1,17 +1,18 @@
-INSERT INTO dbo.rsREPORTS (USNNO, RMNNO)
-    SELECT
-        u.USNNO,
-        v.RMNNO
-    FROM dbo.USERINFO u
-    CROSS JOIN (VALUES
-        (908)
-    ) v(RMNNO)
-    WHERE
-        u.USNNO NOT IN (44, 94)
-        AND NOT EXISTS
-        (
-            SELECT 1
-            FROM dbo.rsREPORTS rr
-            WHERE rr.USNNO = u.USNNO
-              AND rr.RMNNO = v.RMNNO
-        );
+	DataSet data = ExecStoredProcWithParams(cs, meta.SpName, bag);
+	
+	after this code i want to check one new column in boolean value (column name be like bypassRDLCFlag like that) REPORT_SP_MAP from this table
+	And if one then import that dataset into excel with same excell datatype with same format and order you just direct download that dataset into excel very fastly.
+	
+	 if (v == "E")
+               {
+
+                    BindToReportAuto(rdlcVirtual, data, forExcel: true);
+
+                    SendExcel("Report_" + Path.GetFileNameWithoutExtension(rdlcVirtual) + ".xlsx");
+                    TraceLog("EXIT btnContinue_Click (Excel path)", stage: "EXIT");
+                    return;
+               }
+			   
+			   call excel download method here with bypass flag.
+			   C# code
+			   
