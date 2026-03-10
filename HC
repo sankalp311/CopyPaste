@@ -1,150 +1,284 @@
-<%@ Page Language="C#" AutoEventWireup="true" CodeBehind="Report.aspx.cs" Inherits="ReportRDLC.Report16.ReportRdlc" %>
-<%@ Register Assembly="Microsoft.ReportViewer.WebForms" Namespace="Microsoft.Reporting.WebForms" TagPrefix="rsweb" %>
-<!DOCTYPE html>
-<html xmlns="http://www.w3.org/1999/xhtml">
-<head runat="server">
-  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>RDLC Report</title>
-<%--  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css" />
-  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
-  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>--%>
-	<script src="Content/js/gapis.js"></script>
-	<link href="Content/maxcdn1.css" rel="stylesheet" />
-	<script src="Content/js/maxcd1.js"></script>
-  <style>
-			.overlay{position:fixed;left:0;top:0;width:100%;height:100%;background:#808080;opacity:.8;z-index:9999;display:none}
-			
-			.container{
-				width:1300px !important;
-			}
-  </style>
-  <script>function Loader(s) { if (s) $("#busy").show(); else $("#busy").hide(); }</script>
-</head>
-<body>
-<form id="form1" runat="server" class="container classborder" style="margin-top:12px">
-<div id="busy" class="overlay">
-  <asp:Image ID="imgBusy" runat="server"
-             ImageUrl="~/Report16/Images/ProgressImage.gif"
-             AlternateText="Processing..."
-             Style="display:block;margin:20% auto 0;" />
-</div>
+RDLC values and expression
 
-  <!-- FILTERS (shown only when ?Filter=... is present) -->
-  <asp:Panel ID="pnlFilters" runat="server" Visible="false" CssClass="panel panel-default">
-    <div class="panel-heading" style="font-size:25px;color:#336699;"><b><u>Optional Report Choices</u></b></div>
-    <div class="panel-body form-horizontal">
-      <asp:Literal ID="ltrParams" runat="server" />
-      <div class="form-group">
-        <div class="col-sm-12 btncontinue">
+Start Date     - [EMDTBEG]
+Event Name     - [EMCNM]
+Event #        - [EMCNO]
+Rooms Contracted - =Fields!Amount_Reserved.Value + Fields!Adjustments.Value
+Rooms Not Blocked - =(Fields!Amount_Reserved.Value+Fields!Adjustments.Value)-(Fields!Block_Amount_Reserved.Value+Fields!Block_Adjustments.Value)
+Rooms Blocked    - =Fields!Block_Amount_Reserved.Value+Fields!Block_Adjustments.Value
+Picked Up Rooms  - =Fields!General_Pickups.Value+Fields!Block_Pickups.Value
+Rooms Available (in Blocks) - =Fields!Block_Remaining_Available.Value
+Reservtion Shut Down - [EODDATE]
 
-       <asp:Button ID="btnContinue" runat="server" Text="Continue" CssClass="btn btn-primary"
-    OnClick="btnContinue_Click"
-    OnClientClick="return startDownload();" />
+below is sql sp 
+CREATE PROCEDURE [dbo].[sp_ICM_RPT_Events_Inventory_Rollup_ALL_RDLC]  
+AS  
+BEGIN  
+    SET NOCOUNT ON;  
+    SET ANSI_WARNINGS OFF;  
+  
+    ------------------------------------------------------------  
+    -- 1) Cache the option rows once (avoid repeated scans)  
+    ------------------------------------------------------------  
+    IF OBJECT_ID('tempdb..#Opt') IS NOT NULL DROP TABLE #Opt;  
+  
+    SELECT eo.EMNNO, eo.EODDATE  
+    INTO #Opt  
+    FROM ICM.dbo.EVENT_OPTIONS eo  
+    WHERE eo.EOCGROUP = 'ONLINEREG_OPTIONS'  
+      AND eo.EOCNAME  = 'ONLINEREGCLOSES';  
+  
+    CREATE CLUSTERED INDEX IX_Opt_EMNNO ON #Opt(EMNNO);  
+  
+    ------------------------------------------------------------  
+    -- 2) Eligible events only once  
+    ------------------------------------------------------------  
+    IF OBJECT_ID('tempdb..#Events') IS NOT NULL DROP TABLE #Events;  
+  
+    SELECT  e.EMNNO,  
+            e.EMCNM,  
+            e.EMCNO,  
+            e.EMCREGISTRARNAME,  
+            e.EMNMAXBLK,  
+            e.EMDTBEG,  
+            e.CUNNO  
+    INTO #Events  
+    FROM ICM.dbo.EVENTS e  
+    JOIN (SELECT DISTINCT EMNNO FROM #Opt) o ON o.EMNNO = e.EMNNO  
+    WHERE e.CUNNO > 1;  
+  
+    CREATE CLUSTERED INDEX IX_Events_EMNNO ON #Events(EMNNO);  
+  
+    ------------------------------------------------------------  
+    -- 3) Inventory rollup (per event)  
+    ------------------------------------------------------------  
+    IF OBJECT_ID('tempdb..#Inv') IS NOT NULL DROP TABLE #Inv;  
+  
+    SELECT  ev.EMNNO,  
+            SUM(hi.HINAMOUNTRESERVED)       AS Amount_Reserved,  
+            SUM(hi.HINREMAININGAVAILABLE)   AS Remaining_Available,  
+            SUM(hi.HINADJUSTMENTS)          AS Adjustments,  
+            SUM(hi.HINOVERBOOKAMOUNT)       AS Overbook  
+    INTO #Inv  
+    FROM #Events ev  
+    JOIN ICM.dbo.HOTEL h                 ON h.EMNNO = ev.EMNNO  
+    JOIN ICM.dbo.HOTELROOMCATEGORIES hrc ON hrc.HTNNO = h.HTNNO  
+    JOIN ICM.dbo.HOTELINVENTORY hi       ON hi.HRNNO = hrc.HRNNO  
+    GROUP BY ev.EMNNO;  
+  
+    CREATE CLUSTERED INDEX IX_Inv_EMNNO ON #Inv(EMNNO);  
+  
+    ------------------------------------------------------------  
+    -- 4) Block Inventory rollup (per event)  
+    --    NOTE: Keep SAME null semantics as your original:  
+    --    use (HBCLNM + HBCFNM) NOT IN (...)  (NOT CONCAT)  
+    ------------------------------------------------------------  
+    IF OBJECT_ID('tempdb..#BlockInv') IS NOT NULL DROP TABLE #BlockInv;  
+  
+    SELECT  ev.EMNNO,  
+            SUM(hrbi.RBNAMOUNTRESERVED)       AS Block_Amount_Reserved,  
+            SUM(hrbi.RBNREMAININGAVAILABLE)   AS Block_Remaining_Available,  
+            SUM(hrbi.RBNADJUSTMENTS)          AS Block_Adjustments  
+    INTO #BlockInv  
+    FROM #Events ev  
+    JOIN ICM.dbo.HOTEL h                      ON h.EMNNO = ev.EMNNO  
+    JOIN ICM.dbo.HOTELROOMBLOCKS hrb          ON hrb.HTNNO = h.HTNNO  
+    JOIN ICM.dbo.HOTELROOMBLOCKINVENTORY hrbi ON hrbi.HBNNO = hrb.HBNNO  
+    WHERE (hrb.HBCLNM + hrb.HBCFNM) NOT IN ('CompTournament', 'BillingsleyJohn')  
+    GROUP BY ev.EMNNO;  
+  
+    CREATE CLUSTERED INDEX IX_BlockInv_EMNNO ON #BlockInv(EMNNO);  
+  
+    ------------------------------------------------------------  
+    -- 5) Pickups in ONE PASS (General + Block together)  
+    ------------------------------------------------------------  
+    IF OBJECT_ID('tempdb..#Pickups') IS NOT NULL DROP TABLE #Pickups;  
+  
+    SELECT  ev.EMNNO,  
+            -- General pickups: reservation NOT tied to block (HBNNO IS NULL)  
+            SUM(CASE WHEN r.HBNNO IS NULL THEN 1 ELSE 0 END) AS General_Pickups,  
+  
+            -- Block pickups: reservation tied to block, exclude the two names  
+            SUM(CASE WHEN r.HBNNO IS NOT NULL  
+                      AND (hrb.HBCLNM + hrb.HBCFNM) NOT IN ('CompTournament', 'BillingsleyJohn')  
+                     THEN 1 ELSE 0 END) AS Block_Pickups  
+    INTO #Pickups  
+    FROM #Events ev  
+    JOIN ICM.dbo.REGMST rm            ON rm.EMNNO = ev.EMNNO  
+    JOIN ICM.dbo.RESERVATIONS r       ON r.RGNNO = rm.RGNNO  
+                                    AND r.RSDTXLD IS NULL  
+    JOIN ICM.dbo.RESNIGHTS rn         ON rn.RSNNO = r.RSNNO  
+    LEFT JOIN ICM.dbo.HOTELROOMBLOCKS hrb ON hrb.HBNNO = r.HBNNO  
+    GROUP BY ev.EMNNO;  
+  
+    CREATE CLUSTERED INDEX IX_Pickups_EMNNO ON #Pickups(EMNNO);  
+  
+    ------------------------------------------------------------  
+    -- 6) Final output (same columns + order)  
+    ------------------------------------------------------------  
+    SELECT  
+        ev.EMNNO,  
+        ev.EMCNM,  
+        ev.EMCNO,  
+        ev.EMCREGISTRARNAME,  
+  
+        inv.Amount_Reserved,  
+        inv.Remaining_Available,  
+        inv.Adjustments,  
+        inv.Overbook,  
+  
+        ISNULL(bi.Block_Amount_Reserved, 0)      AS Block_Amount_Reserved,  
+        ISNULL(bi.Block_Remaining_Available, 0)  AS Block_Remaining_Available,  
+        ISNULL(bi.Block_Adjustments, 0)          AS Block_Adjustments,  
+  
+        ISNULL(pk.General_Pickups, 0)            AS General_Pickups,  
+        ISNULL(pk.Block_Pickups, 0)              AS Block_Pickups,  
+  
+        ev.EMNMAXBLK,  
+        ev.EMDTBEG,  
+        opt.EODDATE,  
+        ev.CUNNO  
+    FROM #Events ev  
+    JOIN #Opt opt       ON opt.EMNNO = ev.EMNNO  
+    JOIN #Inv inv       ON inv.EMNNO = ev.EMNNO  
+    LEFT JOIN #BlockInv bi ON bi.EMNNO = ev.EMNNO  
+    LEFT JOIN #Pickups pk  ON pk.EMNNO = ev.EMNNO  
+      
+  
+END  
+
+only one onder on final result in rdlc file which is EVENTS.EMDTBEG ASC.
 
 
 
+now i created another sp and i want same calculation and order like above but in sp
+i cant use expression. So below is my Excelbypass sp AND i want to send only usable values like in very top.
 
-        </div>
-      </div>
-    </div>
-  </asp:Panel>
-
-  <!-- Optional in-page preview when V is not P/E -->
-  <asp:Panel ID="pnlViewer" runat="server" Visible="false">
-    <rsweb:ReportViewer ID="rv" runat="server"
-      AsyncRendering="false" SizeToReportContent="true"
-      Width="100%" Height="900px" />
-  </asp:Panel>
-
-   <iframe id="downloadFrame" name="downloadFrame" style="display:none"></iframe>
-<input type="hidden" id="dlToken" name="dlToken" />
-</form>
-<script>
-	var dlPoll = null;
-	window.__pdfSubmitArmed = false;
-	function clearLoader() {
-		Loader(false);
-		if (dlPoll) { clearInterval(dlPoll); dlPoll = null; }
-	}
-
-	function startDownload() {
-		var v = (new URLSearchParams(location.search)).get('V') || '';
-		var V = v.toUpperCase();
-
-		var isExcel = (V === 'E');
-		var isPdf = (V === 'P');
-
-		// Normal preview (no file)
-		if (!isExcel && !isPdf) {
-			Loader(true);
-			return true;
-		}
-
-		var form = document.getElementById('<%= form1.ClientID %>');
-
-		// ✅ PDF INLINE on SAME TAB (no loader, no iframe)
-		//if (isPdf) {
-		//	clearLoader();                 // hide overlay if it was visible
-		//	try { form.removeAttribute('target'); } catch (e) { }  // ensure NOT stuck on downloadFrame
-		//	return true;                   // normal postback -> PDF opens in same tab
-		//}
+SO gpt can you compare both logic and correct my below sp accordingly?
 
 
-		if (isPdf) {
-			// ensure NOT stuck on iframe target from Excel flow
-			try { form.removeAttribute('target'); } catch (e) { }
+CREATE PROCEDURE [dbo].[sp_ICM_RPT_Events_Inventory_Rollup_ALL_RDLCExcelBypass]        
+AS        
+BEGIN        
+    SET NOCOUNT ON;        
+    SET ANSI_WARNINGS OFF;        
+        
+    ------------------------------------------------------------        
+    -- 1) Cache the option rows once (avoid repeated scans)        
+    ------------------------------------------------------------        
+    IF OBJECT_ID('tempdb..#Opt') IS NOT NULL DROP TABLE #Opt;        
+        
+    SELECT eo.EMNNO, eo.EODDATE        
+    INTO #Opt        
+    FROM ICM.dbo.EVENT_OPTIONS eo        
+    WHERE eo.EOCGROUP = 'ONLINEREG_OPTIONS'        
+      AND eo.EOCNAME  = 'ONLINEREGCLOSES';        
+        
+    CREATE CLUSTERED INDEX IX_Opt_EMNNO ON #Opt(EMNNO);        
+        
+    ------------------------------------------------------------        
+    -- 2) Eligible events only once        
+    ------------------------------------------------------------        
+    IF OBJECT_ID('tempdb..#Events') IS NOT NULL DROP TABLE #Events;        
+        
+    SELECT  e.EMNNO,        
+            e.EMCNM,        
+            e.EMCNO,        
+            e.EMCREGISTRARNAME,        
+            e.EMNMAXBLK,        
+            e.EMDTBEG,        
+            e.CUNNO        
+    INTO #Events        
+    FROM ICM.dbo.EVENTS e        
+    JOIN (SELECT DISTINCT EMNNO FROM #Opt) o ON o.EMNNO = e.EMNNO        
+    WHERE e.CUNNO > 1;        
+        
+    CREATE CLUSTERED INDEX IX_Events_EMNNO ON #Events(EMNNO);        
+        
+    ------------------------------------------------------------        
+    -- 3) Inventory rollup (per event)        
+    ------------------------------------------------------------        
+    IF OBJECT_ID('tempdb..#Inv') IS NOT NULL DROP TABLE #Inv;        
+        
+    SELECT  ev.EMNNO,        
+            SUM(hi.HINAMOUNTRESERVED)       AS Amount_Reserved,        
+            SUM(hi.HINREMAININGAVAILABLE)   AS Remaining_Available,        
+            SUM(hi.HINADJUSTMENTS)          AS Adjustments,        
+            SUM(hi.HINOVERBOOKAMOUNT)       AS Overbook        
+    INTO #Inv        
+    FROM #Events ev        
+    JOIN ICM.dbo.HOTEL h                 ON h.EMNNO = ev.EMNNO        
+    JOIN ICM.dbo.HOTELROOMCATEGORIES hrc ON hrc.HTNNO = h.HTNNO        
+    JOIN ICM.dbo.HOTELINVENTORY hi       ON hi.HRNNO = hrc.HRNNO        
+    GROUP BY ev.EMNNO;        
+        
+    CREATE CLUSTERED INDEX IX_Inv_EMNNO ON #Inv(EMNNO);        
+        
+    ------------------------------------------------------------        
+    -- 4) Block Inventory rollup (per event)        
+    --    NOTE: Keep SAME null semantics as your original:        
+    --    use (HBCLNM + HBCFNM) NOT IN (...)  (NOT CONCAT)        
+    ------------------------------------------------------------        
+    IF OBJECT_ID('tempdb..#BlockInv') IS NOT NULL DROP TABLE #BlockInv;        
+        
+    SELECT  ev.EMNNO,        
+            SUM(hrbi.RBNAMOUNTRESERVED)       AS Block_Amount_Reserved,        
+            SUM(hrbi.RBNREMAININGAVAILABLE)   AS Block_Remaining_Available,        
+            SUM(hrbi.RBNADJUSTMENTS)          AS Block_Adjustments        
+    INTO #BlockInv        
+    FROM #Events ev        
+    JOIN ICM.dbo.HOTEL h                      ON h.EMNNO = ev.EMNNO        
+    JOIN ICM.dbo.HOTELROOMBLOCKS hrb          ON hrb.HTNNO = h.HTNNO        
+    JOIN ICM.dbo.HOTELROOMBLOCKINVENTORY hrbi ON hrbi.HBNNO = hrb.HBNNO        
+    WHERE (hrb.HBCLNM + hrb.HBCFNM) NOT IN ('CompTournament', 'BillingsleyJohn')        
+    GROUP BY ev.EMNNO;        
+        
+    CREATE CLUSTERED INDEX IX_BlockInv_EMNNO ON #BlockInv(EMNNO);        
+        
+    ------------------------------------------------------------        
+    -- 5) Pickups in ONE PASS (General + Block together)        
+    ------------------------------------------------------------        
+    IF OBJECT_ID('tempdb..#Pickups') IS NOT NULL DROP TABLE #Pickups;        
+        
+    SELECT  ev.EMNNO,        
+            -- General pickups: reservation NOT tied to block (HBNNO IS NULL)        
+      SUM(CASE WHEN r.HBNNO IS NULL THEN 1 ELSE 0 END) AS General_Pickups,        
+        
+            -- Block pickups: reservation tied to block, exclude the two names        
+            SUM(CASE WHEN r.HBNNO IS NOT NULL        
+                      AND (hrb.HBCLNM + hrb.HBCFNM) NOT IN ('CompTournament', 'BillingsleyJohn')        
+                     THEN 1 ELSE 0 END) AS Block_Pickups        
+    INTO #Pickups        
+    FROM #Events ev        
+    JOIN ICM.dbo.REGMST rm            ON rm.EMNNO = ev.EMNNO        
+    JOIN ICM.dbo.RESERVATIONS r       ON r.RGNNO = rm.RGNNO        
+                                    AND r.RSDTXLD IS NULL        
+    JOIN ICM.dbo.RESNIGHTS rn         ON rn.RSNNO = r.RSNNO        
+    LEFT JOIN ICM.dbo.HOTELROOMBLOCKS hrb ON hrb.HBNNO = r.HBNNO        
+    GROUP BY ev.EMNNO;        
+        
+    CREATE CLUSTERED INDEX IX_Pickups_EMNNO ON #Pickups(EMNNO);        
+        
+    ------------------------------------------------------------        
+    -- 6) Final output (same columns + order)        
+    ------------------------------------------------------------        
+    SELECT        
+  ev.EMDTBEG  [Start Date],      
+  CAST(ev.EMCNM AS VARCHAR) [Event Name],      
+  CAST(ev.EMCNO AS VARCHAR)  [Event #],    
+  (inv.Amount_Reserved+inv.Adjustments) [Rooms Contracted],  
+  (inv.Amount_Reserved+inv.Adjustments)-(ISNULL(bi.Block_Amount_Reserved, 0)+inv.Adjustments) [Rooms Not Blocked],      
+  ISNULL(bi.Block_Amount_Reserved, 0)+  inv.Adjustments [Rooms Blocked],      
+  ISNULL(pk.General_Pickups, 0)+ ISNULL(pk.Block_Pickups, 0) [Picked Up Rooms],      
+  ISNULL(bi.Block_Remaining_Available, 0) [Rooms Available (in Blocks)],      
+  opt.EODDATE [Reservtion Shut Down]      
+    FROM #Events ev        
+    JOIN #Opt opt       ON opt.EMNNO = ev.EMNNO        
+    JOIN #Inv inv       ON inv.EMNNO = ev.EMNNO        
+    LEFT JOIN #BlockInv bi ON bi.EMNNO = ev.EMNNO        
+    LEFT JOIN #Pickups pk  ON pk.EMNNO = ev.EMNNO        
+   order by ev.EMDTBEG asc         
+        
+END 
 
-			// 2nd click: allow normal postback so server renders PDF
-			if (window.__pdfSubmitArmed) {
-				window.__pdfSubmitArmed = false;
-				return true;
-			}
-
-			// 1st click: show loader, then re-click after UI paints
-			Loader(true);
-			window.__pdfSubmitArmed = true;
-
-			setTimeout(function () {
-				document.getElementById('<%= btnContinue.ClientID %>').click();
-    }, 50);
-
-			return false; // cancel immediate submit
-		}
-
-
-		// ✅ EXCEL download -> keep your existing cookie polling flow (no change)
-		var token = Date.now().toString();
-		document.getElementById('dlToken').value = token;
-
-		document.cookie = 'fileDownloadToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-
-		form.setAttribute('target', 'downloadFrame');
-
-		Loader(true);
-
-		dlPoll = setInterval(function () {
-			if (document.cookie.indexOf('fileDownloadToken=' + token) !== -1) {
-				clearLoader();
-				form.removeAttribute('target');
-				document.cookie = 'fileDownloadToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
-			}
-		}, 400);
-
-		setTimeout(function () {
-			clearLoader();
-			form.removeAttribute('target');
-		}, 120000);
-
-		return true;
-	}
-
-</script>
-
-
-
-</body>
-    
-
-</html>
 
