@@ -1,6 +1,7 @@
-    private void SendDataSetAsExcel(DataSet ds, string fileName)
+private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
           {
-               //using (var wb = new ClosedXML.Excel.XLWorkbook(ClosedXML.Excel.XLEventTracking.Disabled))
+               var formatMap = GetExcelColumnFormatMap(rptId);
+
                using (var wb = new XLWorkbook())
                {
                     if (ds == null || ds.Tables.Count == 0)
@@ -25,20 +26,19 @@
 
                               var ws = wb.Worksheets.Add(sheetName);
 
-                              // headers
                               for (int col = 0; col < dt.Columns.Count; col++)
                               {
                                    ws.Cell(1, col + 1).Value = dt.Columns[col].ColumnName;
                                    ws.Cell(1, col + 1).Style.Font.Bold = true;
                               }
 
-                              // data
                               for (int row = 0; row < dt.Rows.Count; row++)
                               {
                                    for (int col = 0; col < dt.Columns.Count; col++)
                                    {
                                         object value = dt.Rows[row][col];
                                         var cell = ws.Cell(row + 2, col + 1);
+                                        string columnName = dt.Columns[col].ColumnName;
 
                                         if (value == DBNull.Value || value == null)
                                         {
@@ -50,8 +50,13 @@
 
                                         if (t == typeof(DateTime))
                                         {
-                                             cell.Value = Convert.ToDateTime(value);
-                                             cell.Style.DateFormat.Format = "dd-MMM-yyyy HH:mm:ss";
+                                             DateTime dtValue = Convert.ToDateTime(value);
+                                             cell.Value = dtValue;
+
+                                             if (formatMap.ContainsKey(columnName))
+                                                  cell.Style.DateFormat.Format = formatMap[columnName];
+                                             else
+                                                  cell.Style.DateFormat.Format = "dd-MMM-yyyy HH:mm:ss";
                                         }
                                         else if (t == typeof(bool))
                                         {
@@ -82,7 +87,7 @@
                               ws.SheetView.FreezeRows(1);
 
                               if (dt.Columns.Count > 0)
-                                   ws.Columns(1, dt.Columns.Count).AdjustToContents(1, Math.Min(dt.Rows.Count + 1, 200));
+                                   ws.Columns(1, dt.Columns.Count).AdjustToContents(1, Math.Min(dt.Rows.Count + 1, 100));
 
                               sheetIndex++;
                          }
@@ -91,14 +96,18 @@
                     using (MemoryStream ms = new MemoryStream())
                     {
                          wb.SaveAs(ms);
-                         byte[] bytes = ms.ToArray();
+                         ms.Position = 0;
 
                          Response.Clear();
+                         Response.ClearContent();
+                         Response.ClearHeaders();
                          Response.Buffer = true;
+                         Response.BufferOutput = true;
                          Response.Charset = "";
                          Response.ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-                         Response.AddHeader("content-disposition", "attachment;filename=\"" + fileName + "\"");
-                         Response.BinaryWrite(bytes);
+                         Response.AddHeader("Content-Disposition", "attachment;filename=\"" + fileName + "\"");
+                         Response.AddHeader("Content-Length", ms.Length.ToString());
+                         Response.BinaryWrite(ms.ToArray());
                          Response.Flush();
                          HttpContext.Current.ApplicationInstance.CompleteRequest();
                     }
