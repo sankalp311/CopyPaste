@@ -1,162 +1,150 @@
- private void SendDataSetAsExcel(DataSet ds, string fileName, string rptId)
-          {
-               var formatMap = GetExcelColumnFormatMap(rptId);
+<%@ Page Language="C#" AutoEventWireup="true" CodeBehind="Report.aspx.cs" Inherits="ReportRDLC.Report16.ReportRdlc" %>
+<%@ Register Assembly="Microsoft.ReportViewer.WebForms" Namespace="Microsoft.Reporting.WebForms" TagPrefix="rsweb" %>
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head runat="server">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>RDLC Report</title>
+<%--  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/css/bootstrap.min.css" />
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+  <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.0/js/bootstrap.min.js"></script>--%>
+	<script src="Content/js/gapis.js"></script>
+	<link href="Content/maxcdn1.css" rel="stylesheet" />
+	<script src="Content/js/maxcd1.js"></script>
+  <style>
+			.overlay{position:fixed;left:0;top:0;width:100%;height:100%;background:#808080;opacity:.8;z-index:9999;display:none}
+			
+			.container{
+				width:1300px !important;
+			}
+  </style>
+  <script>function Loader(s) { if (s) $("#busy").show(); else $("#busy").hide(); }</script>
+</head>
+<body>
+<form id="form1" runat="server" class="container classborder" style="margin-top:12px">
+<div id="busy" class="overlay">
+  <asp:Image ID="imgBusy" runat="server"
+             ImageUrl="~/Report16/Images/ProgressImage.gif"
+             AlternateText="Processing..."
+             Style="display:block;margin:20% auto 0;" />
+</div>
 
-               using (var wb = new XLWorkbook())
-               {
-                    if (ds == null || ds.Tables.Count == 0)
-                    {
-                         var ws = wb.Worksheets.Add("Sheet1");
-                         ws.Cell(1, 1).Value = "No data found";
-                    }
-                    else
-                    {
-                         int sheetIndex = 1;
+  <!-- FILTERS (shown only when ?Filter=... is present) -->
+  <asp:Panel ID="pnlFilters" runat="server" Visible="false" CssClass="panel panel-default">
+    <div class="panel-heading" style="font-size:25px;color:#336699;"><b><u>Optional Report Choices</u></b></div>
+    <div class="panel-body form-horizontal">
+      <asp:Literal ID="ltrParams" runat="server" />
+      <div class="form-group">
+        <div class="col-sm-12 btncontinue">
 
-                         foreach (DataTable dt in ds.Tables)
-                         {
-                              if (dt == null) continue;
+       <asp:Button ID="btnContinue" runat="server" Text="Continue" CssClass="btn btn-primary"
+    OnClick="btnContinue_Click"
+    OnClientClick="return startDownload();" />
 
-                              string sheetName = !string.IsNullOrWhiteSpace(dt.TableName)
-                                  ? SafeExcelSheetName(dt.TableName)
-                                  : "Sheet" + sheetIndex;
 
-                              if (wb.Worksheets.Any(x => x.Name.Equals(sheetName, StringComparison.OrdinalIgnoreCase)))
-                                   sheetName = "Sheet" + sheetIndex;
 
-                              var ws = wb.Worksheets.Add(sheetName);
 
-                              // Header
-                              for (int col = 0; col < dt.Columns.Count; col++)
-                              {
-                                   ws.Cell(1, col + 1).Value = dt.Columns[col].ColumnName;
-                                   ws.Cell(1, col + 1).Style.Font.Bold = true;
-                              }
+        </div>
+      </div>
+    </div>
+  </asp:Panel>
 
-                              // Data
-                              for (int row = 0; row < dt.Rows.Count; row++)
-                              {
-                                   for (int col = 0; col < dt.Columns.Count; col++)
-                                   {
-                                        object value = dt.Rows[row][col];
-                                        var cell = ws.Cell(row + 2, col + 1);
-                                        string columnName = dt.Columns[col].ColumnName;
+  <!-- Optional in-page preview when V is not P/E -->
+  <asp:Panel ID="pnlViewer" runat="server" Visible="false">
+    <rsweb:ReportViewer ID="rv" runat="server"
+      AsyncRendering="false" SizeToReportContent="true"
+      Width="100%" Height="900px" />
+  </asp:Panel>
 
-                                        var nullAsDefaultDateColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-                                                  {
-                                                      "Date of Request",
-                                                      "Approved Date",
-                                                      "Override",
-                                                      "TeamCut-off"
-                                                  };
-                                        if (value == DBNull.Value || value == null)
-                                        {
-                                             if (nullAsDefaultDateColumns.Contains(columnName))
-                                             {
-                                                  cell.Value = new DateTime(1900, 1, 1, 0, 0, 0);
+   <iframe id="downloadFrame" name="downloadFrame" style="display:none"></iframe>
+<input type="hidden" id="dlToken" name="dlToken" />
+</form>
+<script>
+	var dlPoll = null;
+	window.__pdfSubmitArmed = false;
+	function clearLoader() {
+		Loader(false);
+		if (dlPoll) { clearInterval(dlPoll); dlPoll = null; }
+	}
 
-                                                  if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
-                                                       cell.Style.DateFormat.Format = formatMap[columnName];
-                                                  else
-                                                       cell.Style.DateFormat.Format = "M/d/yyyy  h:mm:ss AM/PM";
-                                             }
-                                             else
-                                             {
-                                                  cell.Value = string.Empty;
-                                                  cell.Style.NumberFormat.Format = "General";
-                                             }
+	function startDownload() {
+		var v = (new URLSearchParams(location.search)).get('V') || '';
+		var V = v.toUpperCase();
 
-                                             continue;
-                                        }
+		var isExcel = (V === 'E');
+		var isPdf = (V === 'P');
 
-                                        Type t = Nullable.GetUnderlyingType(dt.Columns[col].DataType) ?? dt.Columns[col].DataType;
+		// Normal preview (no file)
+		if (!isExcel && !isPdf) {
+			Loader(true);
+			return true;
+		}
 
-                                        if (t == typeof(DateTime))
-                                        {
-                                             DateTime dtValue = Convert.ToDateTime(value);
-                                             cell.Value = dtValue;
+		var form = document.getElementById('<%= form1.ClientID %>');
 
-                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
-                                                  cell.Style.DateFormat.Format = formatMap[columnName];
-                                             else
-                                                  cell.Style.DateFormat.Format = "dd-MMM-yyyy HH:mm:ss";
-                                        }
-                                        else if (t == typeof(bool))
-                                        {
-                                             cell.Value = Convert.ToBoolean(value);
-                                             cell.Style.NumberFormat.Format = "General";
-                                        }
-                                        else if (t == typeof(byte) ||
-                                                 t == typeof(short) ||
-                                                 t == typeof(int) ||
-                                                 t == typeof(long))
-                                        {
-                                             cell.Value = Convert.ToInt64(value);
+		// ✅ PDF INLINE on SAME TAB (no loader, no iframe)
+		//if (isPdf) {
+		//	clearLoader();                 // hide overlay if it was visible
+		//	try { form.removeAttribute('target'); } catch (e) { }  // ensure NOT stuck on downloadFrame
+		//	return true;                   // normal postback -> PDF opens in same tab
+		//}
 
-                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
-                                                  cell.Style.NumberFormat.Format = formatMap[columnName];
-                                             else
-                                                  cell.Style.NumberFormat.Format = "0";
-                                        }
-                                        else if (t == typeof(decimal) ||
-                                                 t == typeof(double) ||
-                                                 t == typeof(float))
-                                        {
-                                             cell.Value = Convert.ToDecimal(value);
 
-                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
-                                                  cell.Style.NumberFormat.Format = formatMap[columnName];
-                                             else
-                                                  cell.Style.NumberFormat.Format = "0.00########";
-                                        }
-                                        else if (t == typeof(string) || t == typeof(char))
-                                        {
-                                             cell.Value = Convert.ToString(value);
+		if (isPdf) {
+			// ensure NOT stuck on iframe target from Excel flow
+			try { form.removeAttribute('target'); } catch (e) { }
 
-                                             // varchar/string should stay General as per your need
-                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
-                                                  cell.Style.NumberFormat.Format = formatMap[columnName];
-                                             else
-                                                  cell.Style.NumberFormat.Format = "General";
-                                        }
-                                        else
-                                        {
-                                             cell.Value = Convert.ToString(value);
+			// 2nd click: allow normal postback so server renders PDF
+			if (window.__pdfSubmitArmed) {
+				window.__pdfSubmitArmed = false;
+				return true;
+			}
 
-                                             if (formatMap.ContainsKey(columnName) && !string.IsNullOrWhiteSpace(formatMap[columnName]))
-                                                  cell.Style.NumberFormat.Format = formatMap[columnName];
-                                             else
-                                                  cell.Style.NumberFormat.Format = "General";
-                                        }
-                                   }
-                              }
+			// 1st click: show loader, then re-click after UI paints
+			Loader(true);
+			window.__pdfSubmitArmed = true;
 
-                              ws.SheetView.FreezeRows(1);
+			setTimeout(function () {
+				document.getElementById('<%= btnContinue.ClientID %>').click();
+    }, 50);
 
-                              if (dt.Columns.Count > 0)
-                                   ws.Columns(1, dt.Columns.Count).AdjustToContents(1, Math.Min(dt.Rows.Count + 1, 100));
+			return false; // cancel immediate submit
+		}
 
-                              sheetIndex++;
-                         }
-                    }
 
-                    using (MemoryStream ms = new MemoryStream())
-                    {
-                         wb.SaveAs(ms);
-                         ms.Position = 0;
+		// ✅ EXCEL download -> keep your existing cookie polling flow (no change)
+		var token = Date.now().toString();
+		document.getElementById('dlToken').value = token;
 
-                         Response.Clear();
-                         Response.ClearContent();
-                         Response.ClearHeaders();
-                         Response.Buffer = true;
-                         Response.BufferOutput = true;
-                         Response.Charset = "";
-                         Response.ContentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-                         Response.AddHeader("Content-Disposition", "attachment;filename=\"" + fileName + "\"");
-                         Response.AddHeader("Content-Length", ms.Length.ToString());
-                         Response.BinaryWrite(ms.ToArray());
-                         Response.Flush();
-                         HttpContext.Current.ApplicationInstance.CompleteRequest();
-                    }
-               }
-          }
+		document.cookie = 'fileDownloadToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+
+		form.setAttribute('target', 'downloadFrame');
+
+		Loader(true);
+
+		dlPoll = setInterval(function () {
+			if (document.cookie.indexOf('fileDownloadToken=' + token) !== -1) {
+				clearLoader();
+				form.removeAttribute('target');
+				document.cookie = 'fileDownloadToken=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/';
+			}
+		}, 400);
+
+		setTimeout(function () {
+			clearLoader();
+			form.removeAttribute('target');
+		}, 120000);
+
+		return true;
+	}
+
+</script>
+
+
+
+</body>
+    
+
+</html>
+
