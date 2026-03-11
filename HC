@@ -1,763 +1,330 @@
-using Microsoft.Reporting.WebForms;
-using System;
-using System.Collections.Generic;
-using System.Collections.Specialized;
-using System.Configuration;
-using System.Data;
-using System.Data.SqlClient;
-using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Net;
-using System.Net.Mail;
-using System.Text;
-using System.Text.RegularExpressions;
-using System.Web;
-using System.Web.UI;
-using System.Xml.Linq;
-
-namespace ReportRDLC.Report16
-{
-     public partial class RoomBlockConfirmation : Page
-     {
-          #region ===== Constants / Fields ==========================================================
-
-          // TODO: update these
-          private const string RDLC_VIRTUAL_PATH = "~/Report16/RoomBlockConfirmation.rdlc";
-          private const string SP_NAME = "ICM.dbo.sp_ICM_RPT_RoomBlockConfirmation_RDLC";
-          private const string RDLC_DATASET_NAME = "DS_TTSbBk112";
-
-          // hardcoded recipient for now as requested
-          private const string HARDCODED_TO_EMAIL = "test@example.com";
-
-          // default PDF page settings (change if your report is different)
-          private const string DEFAULT_PAGE_WIDTH = "8.5in";
-          private const string DEFAULT_PAGE_HEIGHT = "11in";
-
-          private NameValueCollection _secureQs;
-          private string _secureToken;
-          private bool _secureQsInitialized = false;
-
-          #endregion
-
-          #region ===== Page Load ===================================================================
-
-          protected void Page_Load(object sender, EventArgs e)
-          {
-               Server.ScriptTimeout = 3600;
-
-               InitSecureQueryFromToken();
-
-               string rawToken = (Request.QueryString["t"] ?? Convert.ToString(RouteData.Values["t"]) ?? "").Trim();
-               _secureToken = rawToken;
-
-               // token was supplied but could not be resolved
-               if (!string.IsNullOrEmpty(rawToken) && _secureQs == null)
-               {
-                    WriteAndEnd("For security reasons, this Room Block Confirmation link is no longer active or appears incorrect.");
-                    return;
-               }
-
-               if (IsPostBack) return;
-
-               ProcessRequest();
-          }
-
-          #endregion
-
-          #region ===== Main Flow ===================================================================
-
-          private void ProcessRequest()
-          {
-               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
-
-               try
-               {
-                    string type = (Q("Type") ?? "").Trim();
-                    string sessionId = FirstNonEmpty(Q("SUSessionID"), Q("sessionid")).Trim();
-                    string blockNo = (Q("BlockNo") ?? "").Trim();
-                    string emnno = (Q("EMNNO") ?? "").Trim();
-                    string emailFlag = (Q("Email") ?? "").Trim();
-
-                    TraceLog("ENTER ProcessRequest | Type=" + type + " | EMNNO=" + emnno + " | BlockNo=" + blockNo + " | Email=" + emailFlag, null, "ENTER");
-
-                    // Validate query values before going ahead
-                    if (!"Block".Equals(type, StringComparison.OrdinalIgnoreCase))
-                    {
-                         WriteAndEnd("Invalid Type. Expected Type=Block.");
-                         return;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(sessionId))
-                    {
-                         WriteAndEnd("Missing session.");
-                         return;
-                    }
-
-                    if (!ValidateSessionId(sessionId, cs))
-                    {
-                         WriteAndEnd("Invalid session!");
-                         return;
-                    }
-
-                    int emnnoInt;
-                    if (!int.TryParse(emnno, out emnnoInt) || emnnoInt <= 0)
-                    {
-                         WriteAndEnd("Invalid EMNNO.");
-                         return;
-                    }
-
-                    int hbnno;
-                    if (!int.TryParse(blockNo, out hbnno) || hbnno <= 0)
-                    {
-                         WriteAndEnd("Invalid BlockNo/HBNNO.");
-                         return;
-                    }
-
-                    DataSet ds = GetDataFromSp(cs, emnnoInt, hbnno);
-
-                    if (ds == null || ds.Tables.Count == 0)
-                    {
-                         WriteAndEnd("No data returned from stored procedure.");
-                         return;
-                    }
-
-                    if (!HasAnyRows(ds))
-                    {
-                         WriteAndEnd("No data found for the supplied EMNNO and BlockNo.");
-                         return;
-                    }
-
-                    string pdfFileName = "RoomBlockConfirmation_" + emnnoInt + "_" + hbnno + ".pdf";
-                    byte[] pdfBytes = BuildPdfBytes(ds);
-
-                    if (pdfBytes == null || pdfBytes.Length == 0)
-                    {
-                         WriteAndEnd("Failed to generate PDF.");
-                         return;
-                    }
-
-                    // If Email=Yes then send the same PDF first
-                    if (IsYes(emailFlag))
-                    {
-                         SendPdfByEmail(
-                             pdfBytes,
-                             pdfFileName,
-                             HARDCODED_TO_EMAIL,
-                             "Room Block Confirmation - EMNNO " + emnnoInt + " | BlockNo " + hbnno,
-                             "Please find attached the Room Block Confirmation PDF."
-                         );
-
-                         TraceLog("Email sent successfully to hardcoded recipient.", null, "EMAIL");
-                    }
-
-                    // Current behavior: render PDF inline even if Email=Yes
-                    // If you want email-only behavior, replace below line with WriteAndEnd("Email sent successfully.");
-                    StreamPdfInline(pdfBytes, pdfFileName);
-
-                    TraceLog("EXIT ProcessRequest", null, "EXIT");
-               }
-               catch (Exception ex)
-               {
-                    Exception root = GetRootException(ex);
-                    TraceLog("ProcessRequest ERROR", root, "ERROR");
-                    WriteAndEnd(root.Message);
-               }
-          }
-
-          #endregion
-
-          #region ===== Data Fetch ===================================================================
-
-          private DataSet GetDataFromSp(string cs, int emnno, int hbnno)
-          {
-               TraceLog("ENTER GetDataFromSp | EMNNO=" + emnno + " | HBNNO=" + hbnno, null, "ENTER");
-
-               DataSet ds = new DataSet();
-
-               using (SqlConnection con = new SqlConnection(cs))
-               using (SqlCommand cmd = new SqlCommand(SP_NAME, con))
-               {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.CommandTimeout = 3600;
-
-                    cmd.Parameters.Add("@EMNNO", SqlDbType.Int).Value = emnno;
-                    cmd.Parameters.Add("@HBNNO", SqlDbType.Int).Value = hbnno;
-
-                    using (SqlDataAdapter da = new SqlDataAdapter(cmd))
-                    {
-                         da.Fill(ds);
-                    }
-               }
-
-               TraceLog("EXIT GetDataFromSp | Tables=" + ds.Tables.Count, null, "EXIT");
-               return ds;
-          }
-
-          #endregion
-
-          #region ===== PDF Build ====================================================================
-
-          private byte[] BuildPdfBytes(DataSet spResult)
-          {
-               if (spResult == null)
-                    throw new InvalidOperationException("No dataset returned.");
-
-               if (spResult.Tables.Count == 0)
-                    throw new InvalidOperationException("Stored procedure returned no result sets.");
-
-               if (spResult.Tables[0].Rows.Count == 0)
-                    throw new InvalidOperationException("No rows returned for report.");
-
-               string rdlcPath = Server.MapPath(NormalizeRdlcPath(RDLC_VIRTUAL_PATH));
-               if (!File.Exists(rdlcPath))
-                    throw new FileNotFoundException("RDLC not found: " + rdlcPath);
-
-               BindRoomBlockReport(rdlcPath, spResult.Tables[0]);
-
-               string mimeType;
-               string encoding;
-               string extension;
-               string[] streams;
-               Warning[] warnings;
-
-               string deviceInfo = @"<DeviceInfo>
-  <OutputFormat>PDF</OutputFormat>
-  <PageWidth>8.5in</PageWidth>
-  <PageHeight>11in</PageHeight>
-  <MarginTop>0.25in</MarginTop>
-  <MarginLeft>0.25in</MarginLeft>
-  <MarginRight>0.25in</MarginRight>
-  <MarginBottom>0.25in</MarginBottom>
-</DeviceInfo>";
-
-               byte[] bytes = rv.LocalReport.Render(
-                   "PDF",
-                   deviceInfo,
-                   out mimeType,
-                   out encoding,
-                   out extension,
-                   out streams,
-                   out warnings
-               );
-
-               return bytes;
-          }
-
-
-          private void BindRoomBlockReport(string rdlcPhysicalPath, DataTable dt)
-          {
-               if (dt == null)
-                    throw new InvalidOperationException("DataTable is null.");
-
-               string xml = File.ReadAllText(rdlcPhysicalPath);
-
-               rv.Reset();
-               rv.ProcessingMode = ProcessingMode.Local;
-
-               using (StringReader sr = new StringReader(xml))
-               {
-                    rv.LocalReport.LoadReportDefinition(sr);
-                    rv.LocalReport.EnableHyperlinks = true;
-               }
-
-               rv.LocalReport.DataSources.Clear();
-
-               // Bind exactly to dataset name from dsConfirmation.xsd / RDLC
-               rv.LocalReport.DataSources.Add(
-                   new ReportDataSource("DS_TTSbBk112", dt)
-               );
-
-               rv.LocalReport.Refresh();
-          }
-
-
-          private void BindToReportAuto(string rdlcPhysicalPath, DataSet spResult)
-          {
-               TraceLog("ENTER BindToReportAuto | RDLC=" + rdlcPhysicalPath + " | Tables=" + spResult.Tables.Count, null, "ENTER");
-
-               string xml = File.ReadAllText(rdlcPhysicalPath);
-
-               rv.Reset();
-               rv.ProcessingMode = ProcessingMode.Local;
-
-               using (StringReader sr = new StringReader(xml))
-               {
-                    rv.LocalReport.LoadReportDefinition(sr);
-               }
-
-               rv.LocalReport.EnableHyperlinks = true;
-               rv.LocalReport.DataSources.Clear();
-
-               XDocument x = XDocument.Parse(xml);
-               XNamespace ns = x.Root.Name.Namespace;
-
-               var rdlcDs = x.Descendants(ns + "DataSet")
-                             .Select(ds => new
-                             {
-                                  Name = (string)ds.Attribute("Name"),
-                                  Fields = ds.Descendants(ns + "Field")
-                                            .Select(f => (string)f.Attribute("Name"))
-                                            .Where(n => !string.IsNullOrWhiteSpace(n))
-                                            .Select(n => n.Trim())
-                                            .ToList()
-                             })
-                             .Where(d => !string.IsNullOrWhiteSpace(d.Name))
-                             .ToList();
-
-               foreach (var dsDef in rdlcDs)
-               {
-                    DataTable chosenTable = null;
-                    int bestScore = -1;
-
-                    // 1) exact table-name match
-                    foreach (DataTable t in spResult.Tables)
-                    {
-                         if (!string.IsNullOrWhiteSpace(t.TableName) &&
-                             string.Equals(t.TableName, dsDef.Name, StringComparison.OrdinalIgnoreCase))
-                         {
-                              chosenTable = t;
-                              bestScore = int.MaxValue;
-                              break;
-                         }
-                    }
-
-                    // 2) best column-overlap match
-                    if (chosenTable == null)
-                    {
-                         foreach (DataTable t in spResult.Tables)
-                         {
-                              int score = 0;
-
-                              foreach (DataColumn c in t.Columns)
-                              {
-                                   if (dsDef.Fields.Any(f => f.Equals(c.ColumnName, StringComparison.OrdinalIgnoreCase)))
-                                        score++;
-                              }
-
-                              if (score > bestScore)
-                              {
-                                   bestScore = score;
-                                   chosenTable = t;
-                              }
-                         }
-                    }
-
-                    if (chosenTable == null)
-                         chosenTable = new DataTable();
-
-                    rv.LocalReport.DataSources.Add(new ReportDataSource(dsDef.Name, chosenTable));
-               }
-
-               // Auto-set report parameters if any
-               var reportParams = rv.LocalReport.GetParameters();
-               if (reportParams != null && reportParams.Count > 0)
-               {
-                    List<ReportParameter> toSet = new List<ReportParameter>();
-
-                    foreach (ReportParameterInfo pInfo in reportParams)
-                    {
-                         string chosenValue = null;
-
-                         // Try first row from any table having same column name
-                         foreach (DataTable t in spResult.Tables)
-                         {
-                              if (t.Columns.Contains(pInfo.Name) && t.Rows.Count > 0)
-                              {
-                                   object raw = t.Rows[0][pInfo.Name];
-                                   chosenValue = FormatForParam(raw, pInfo.DataType);
-
-                                   if (!string.IsNullOrWhiteSpace(chosenValue))
-                                        break;
-                              }
-                         }
-
-                         // fallback to querystring
-                         if (string.IsNullOrWhiteSpace(chosenValue))
-                         {
-                              string qv = Q(pInfo.Name);
-                              if (!string.IsNullOrWhiteSpace(qv))
-                                   chosenValue = qv.Trim();
-                         }
-
-                         if (string.IsNullOrWhiteSpace(chosenValue))
-                         {
-                              switch (pInfo.DataType)
-                              {
-                                   case ParameterDataType.Integer:
-                                        chosenValue = "0";
-                                        break;
-                                   case ParameterDataType.Float:
-                                        chosenValue = "0";
-                                        break;
-                                   case ParameterDataType.Boolean:
-                                        chosenValue = "False";
-                                        break;
-                                   case ParameterDataType.DateTime:
-                                        chosenValue = DateTime.Now.ToString("s", CultureInfo.InvariantCulture);
-                                        break;
-                                   default:
-                                        chosenValue = "";
-                                        break;
-                              }
-                         }
-
-                         toSet.Add(new ReportParameter(pInfo.Name, chosenValue));
-                    }
-
-                    rv.LocalReport.SetParameters(toSet);
-               }
-
-               rv.LocalReport.Refresh();
-
-               TraceLog("EXIT BindToReportAuto", null, "EXIT");
-          }
-
-          private static string FormatForParam(object raw, ParameterDataType type)
-          {
-               if (raw == null || raw == DBNull.Value) return null;
-
-               switch (type)
-               {
-                    case ParameterDataType.Integer:
-                         {
-                              int i;
-                              if (int.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture), out i))
-                                   return i.ToString(CultureInfo.InvariantCulture);
-                              return null;
-                         }
-
-                    case ParameterDataType.Float:
-                         {
-                              double d;
-                              if (double.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture), NumberStyles.Any, CultureInfo.InvariantCulture, out d))
-                                   return d.ToString(CultureInfo.InvariantCulture);
-                              return null;
-                         }
-
-                    case ParameterDataType.DateTime:
-                         {
-                              DateTime dt;
-                              if (raw is DateTime)
-                                   return ((DateTime)raw).ToString("s", CultureInfo.InvariantCulture);
-
-                              if (DateTime.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture),
-                                  CultureInfo.InvariantCulture,
-                                  DateTimeStyles.AssumeLocal,
-                                  out dt))
-                              {
-                                   return dt.ToString("s", CultureInfo.InvariantCulture);
-                              }
-
-                              return null;
-                         }
-
-                    case ParameterDataType.Boolean:
-                         {
-                              string s = Convert.ToString(raw, CultureInfo.InvariantCulture);
-                              if (string.Equals(s, "1") || string.Equals(s, "true", StringComparison.OrdinalIgnoreCase))
-                                   return "True";
-                              if (string.Equals(s, "0") || string.Equals(s, "false", StringComparison.OrdinalIgnoreCase))
-                                   return "False";
-                              return null;
-                         }
-
-                    default:
-                         return Convert.ToString(raw, CultureInfo.InvariantCulture);
-               }
-          }
-
-          #endregion
-
-          #region ===== Email ========================================================================
-
-          private void SendPdfByEmail(byte[] pdfBytes, string fileName, string toEmail, string subject, string body)
-          {
-               if (pdfBytes == null || pdfBytes.Length == 0)
-                    throw new InvalidOperationException("Cannot send empty PDF attachment.");
-
-               string smtpHost = GetAppSetting("RdlcSmtpHost", "smtp.gmail.com");
-               int smtpPort = SafeToInt(GetAppSetting("RdlcSmtpPort", "587"), 587);
-               bool enableSsl = IsYes(GetAppSetting("RdlcSmtpEnableSsl", "Yes"));
-               string smtpUser = GetAppSetting("RdlcSmtpUser", "");
-               string smtpPass = GetAppSetting("RdlcSmtpPass", "");
-               string fromEmail = GetAppSetting("RdlcFromEmail", smtpUser);
-
-               if (string.IsNullOrWhiteSpace(fromEmail))
-                    throw new InvalidOperationException("SMTP FromEmail is missing.");
-
-               using (MailMessage msg = new MailMessage())
-               {
-                    msg.From = new MailAddress(fromEmail);
-                    msg.To.Add(toEmail);
-                    msg.Subject = subject ?? "Room Block Confirmation";
-                    msg.Body = body ?? "";
-                    msg.IsBodyHtml = false;
-
-                    MemoryStream ms = new MemoryStream(pdfBytes);
-                    Attachment att = new Attachment(ms, fileName, "application/pdf");
-                    msg.Attachments.Add(att);
-
-                    using (SmtpClient client = new SmtpClient(smtpHost, smtpPort))
-                    {
-                         client.EnableSsl = enableSsl;
-
-                         if (!string.IsNullOrWhiteSpace(smtpUser))
-                              client.Credentials = new NetworkCredential(smtpUser, smtpPass);
-
-                         client.Send(msg);
-                    }
-               }
-          }
-
-          #endregion
-
-          #region ===== Output =======================================================================
-
-          private void StreamPdfInline(byte[] pdfBytes, string fileName)
-          {
-               Response.Clear();
-               Response.ClearContent();
-               Response.ClearHeaders();
-               Response.TrySkipIisCustomErrors = true;
-               Response.Buffer = true;
-               Response.BufferOutput = true;
-
-               Response.ContentType = "application/pdf";
-               Response.AddHeader("X-Content-Type-Options", "nosniff");
-               Response.AddHeader("Content-Disposition", "inline; filename=\"" + fileName.Replace("\"", "") + "\"");
-               Response.BinaryWrite(pdfBytes);
-               Response.Flush();
-
-               HttpContext.Current.ApplicationInstance.CompleteRequest();
-          }
-
-          private void WriteAndEnd(string text)
-          {
-               Response.Clear();
-               Response.ClearContent();
-               Response.ClearHeaders();
-               Response.TrySkipIisCustomErrors = true;
-               Response.ContentType = "text/plain";
-               Response.Write(text ?? "");
-               Response.Flush();
-               HttpContext.Current.ApplicationInstance.CompleteRequest();
-          }
-
-          #endregion
-
-          #region ===== Token / Query Handling =======================================================
-
-          private string ResolveReportToken(string token, string cs)
-          {
-               if (string.IsNullOrWhiteSpace(token)) return null;
-
-               try
-               {
-                    using (SqlConnection con = new SqlConnection(cs))
-                    using (SqlCommand cmd = new SqlCommand("ICM.dbo.usp_ICM_ReportRequest_Resolve", con))
-                    {
-                         cmd.CommandType = CommandType.StoredProcedure;
-                         cmd.Parameters.Add("@Token", SqlDbType.NVarChar, 50).Value = token.Trim();
-
-                         con.Open();
-                         object o = cmd.ExecuteScalar();
-
-                         if (o == null || o == DBNull.Value)
-                              return null;
-
-                         string inner = Convert.ToString(o);
-                         inner = (inner ?? "").Trim();
-
-                         if (inner.StartsWith("?"))
-                              inner = inner.Substring(1);
-
-                         // If SP returns full URL, extract query-string part
-                         int qIndex = inner.IndexOf('?');
-                         if (qIndex >= 0 && qIndex < inner.Length - 1)
-                              inner = inner.Substring(qIndex + 1);
-
-                         return inner;
-                    }
-               }
-               catch (Exception ex)
-               {
-                    TraceLog("ResolveReportToken error | t=" + token, ex, "TOKEN_ERROR");
-                    return null;
-               }
-          }
-
-          private void InitSecureQueryFromToken()
-          {
-               if (_secureQsInitialized) return;
-               _secureQsInitialized = true;
-
-               string token = (Request.QueryString["t"] ?? Convert.ToString(RouteData.Values["t"]) ?? "").Trim();
-               if (string.IsNullOrWhiteSpace(token))
-                    return;
-
-               try
-               {
-                    string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
-                    string inner = ResolveReportToken(token, cs);
-
-                    if (string.IsNullOrWhiteSpace(inner))
-                    {
-                         TraceLog("InitSecureQueryFromToken: token not found or expired.", null, "SECURE");
-                         return;
-                    }
-
-                    _secureQs = HttpUtility.ParseQueryString(inner);
-               }
-               catch (Exception ex)
-               {
-                    TraceLog("InitSecureQueryFromToken failed for token=" + token, ex, "SECURE");
-               }
-          }
-
-          private string Q(string key)
-          {
-               InitSecureQueryFromToken();
-
-               if (_secureQs != null && !string.IsNullOrWhiteSpace(key))
-               {
-                    string v = _secureQs[key];
-                    if (v != null) return v;
-               }
-
-               return Request.QueryString[key];
-          }
-
-          #endregion
-
-          #region ===== Helpers ======================================================================
-
-          private static bool ValidateSessionId(string sessionId, string cs)
-          {
-               if (string.IsNullOrWhiteSpace(sessionId)) return false;
-
-               using (SqlConnection con = new SqlConnection(cs))
-               using (SqlCommand cmd = new SqlCommand("ICM.dbo.sp_ICM_Validate_SessionID", con))
-               {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.Parameters.Add("@SessionID", SqlDbType.NVarChar, 128).Value = sessionId.Trim();
-
-                    con.Open();
-                    object result = cmd.ExecuteScalar();
-
-                    if (result == null || result == DBNull.Value)
-                         return false;
-
-                    if (result is bool)
-                         return (bool)result;
-
-                    int i;
-                    if (int.TryParse(Convert.ToString(result, CultureInfo.InvariantCulture), out i))
-                         return i == 1;
-
-                    return false;
-               }
-          }
-
-          private static bool HasAnyRows(DataSet ds)
-          {
-               if (ds == null || ds.Tables.Count == 0) return false;
-
-               foreach (DataTable t in ds.Tables)
-               {
-                    if (t != null && t.Rows.Count > 0)
-                         return true;
-               }
-
-               return false;
-          }
-
-          private static string NormalizeRdlcPath(string raw)
-          {
-               string p = (raw ?? "").Replace('\\', '/').Trim();
-
-               if (!p.StartsWith("~"))
-                    p = "~/" + p.TrimStart('/');
-
-               if (string.IsNullOrWhiteSpace(Path.GetExtension(p)))
-                    p = Path.ChangeExtension(p, ".rdlc");
-
-               return p;
-          }
-
-          private static string FirstNonEmpty(params string[] values)
-          {
-               if (values == null) return "";
-
-               foreach (string v in values)
-               {
-                    if (!string.IsNullOrWhiteSpace(v))
-                         return v;
-               }
-
-               return "";
-          }
-
-          private static bool IsYes(string value)
-          {
-               return
-                   string.Equals((value ?? "").Trim(), "Y", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals((value ?? "").Trim(), "YES", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals((value ?? "").Trim(), "TRUE", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals((value ?? "").Trim(), "1", StringComparison.OrdinalIgnoreCase);
-          }
-
-          private static int SafeToInt(string s, int defaultValue)
-          {
-               int x;
-               return int.TryParse((s ?? "").Trim(), out x) ? x : defaultValue;
-          }
-
-          private static string GetAppSetting(string key, string defaultValue)
-          {
-               string v = ConfigurationManager.AppSettings[key];
-               return string.IsNullOrWhiteSpace(v) ? defaultValue : v.Trim();
-          }
-
-          private static Exception GetRootException(Exception ex)
-          {
-               Exception root = ex;
-               while (root != null && root.InnerException != null)
-                    root = root.InnerException;
-               return root ?? ex;
-          }
-
-          private static void TraceLog(string message, Exception ex = null, string stage = null)
-          {
-               try
-               {
-                    HttpContext ctx = HttpContext.Current;
-                    string baseDir = (ctx != null)
-                        ? ctx.Server.MapPath("~/App_Data/logs")
-                        : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "App_Data", "logs");
-
-                    Directory.CreateDirectory(baseDir);
-                    string path = Path.Combine(baseDir, "roomblockconfirmation_trace.txt");
-
-                    using (StreamWriter sw = new StreamWriter(path, true))
-                    {
-                         string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
-                         sw.WriteLine("[" + stamp + "] " + (stage ?? "INFO") + " :: " + message);
-
-                         if (ex != null)
-                         {
-                              sw.WriteLine(ex.GetType().FullName);
-                              sw.WriteLine(ex.Message);
-                              sw.WriteLine(ex.StackTrace);
-                         }
-                    }
-               }
-               catch
-               {
-                    // never break page flow because of logging
-               }
-          }
-
-          #endregion
-     }
+@*@using EventManagerWeb.Areas.Admin.Models;
+@model EventManagerWeb.Areas.Admin.Models.UserModal;
+@{
+    var data = ViewBag.objuserlist;
+
+}*@
+@using EventManagerWeb.Areas.Admin.Models;
+@using Newtonsoft.Json;
+@using Microsoft.AspNetCore.Http
+@inject IHttpContextAccessor HttpContextAccessor
+@{
+    cls_Cancellation obj_UserModal = new cls_Cancellation();
+    CutomerInfo obj_customer = new CutomerInfo();
+    string abv1 = HttpContextAccessor.HttpContext.Session.GetString("CustomerInfo");
+    obj_customer = JsonConvert.DeserializeObject<CutomerInfo>(abv1);
+    
 }
+
+<style>
+    .clmn_hide {
+       display:none;
+    }
+
+    .toolbar {
+        float: right;
+        margin-right: 4%;
+    }
+</style>
+<div class="container-fluid">
+
+   
+
+    <div class="row">
+
+        <div class="col-lg-12">
+            <div class="card">
+                <div class="card-header flex-wrap">
+                    <h4 class="card-title">Room Block Information</h4>
+                    
+                    <div class="">
+                        <a @*href="/admin/RoomBlock/AddRoomBlock"*@ onclick="AddRoomBlock()"   class="btn btn-info"><i class="fas fa-plus me-3"></i> Add Room Block</a>
+
+                    </div>
+                </div>
+				
+				 <input type="hidden" id="HTNNO_" />
+                 <input type="hidden" id="EMNNO_" />
+                <input type="hidden" value="@obj_customer.CUNISENABLE_CREATEROOMBLOCK" id="CUNISENABLE_CREATEROOMBLOCK" />
+                <div class="card-body pt-4">
+
+                   
+
+                    <div class="table-responsive">
+                        <table id="tbl_roomlock" class="table display  table-hover" style="min-width: 845px">
+                            <thead>
+                                <tr>
+                                   
+                                    <th>Action</th>
+                                    <th> Last Name</th>
+                                    <th> First Name</th>
+                                    <th>Sys BlockID</th>
+                                    <th>Blk Acro</th>
+                                    <th style='cursor:pointer;min-width:125px;'>Organization</th>
+                                    <th style='cursor:pointer;min-width:250px;'>Hotel</th>
+                                    <th >Hotel Acro</th>
+                                    <th style='cursor:pointer;min-width:200px;'>Rm Categories</th>
+                                    <th >Rm Categories Acro</th>
+                                    <th style ='cursor:pointer;min-width:150px;'>Rm Type</th>
+                                    <th >Rm Type Acro</th>
+                                    <th>Email Address</th>
+                                    <th>State</th>
+                                    <th>City</th>
+                                    <th>Address</th>
+                                    <th>Start</th>
+                                    <th>End</th>
+                                    <th class="clmn_hide">ReleaseInventory</th>
+
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                            </tbody>
+                        </table>
+
+
+
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+
+
+
+        <div class="modal fade bd-example-modal-lg1" tabindex="-1" role="dialog" aria-hidden="true">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 class="modal-title font-w500">Hotel Inventory</h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal">
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="table-responsive">
+                            <table id="example2" class="table display table-hover" style="min-width: 845px">
+                                <thead>
+                                    <tr>
+
+                                        <th>
+                                            Hotel
+
+                                        </th>
+                                        <th>
+                                            Room
+
+                                        </th>
+                                        <th>
+                                            Room Block
+
+                                        </th>
+                                        <th>
+                                            Jan 15 2022
+
+                                        </th>
+                                        <th>
+                                            Jan 16 2022
+
+                                        </th>
+                                        <th>
+                                            Jan 17 2022
+
+                                        </th>
+                                        <th>
+                                            Jan 18 2022
+
+                                        </th>
+                                        <th>
+                                            Jan 19 2022
+
+                                        </th>
+
+                                    </tr>
+                                </thead>
+                                <tbody>
+
+                                    <tr>
+
+                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
+                                        <td>Ocean View One Bedroom</td>
+                                        <td>YSB-1FS</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>2 / 2 / 0</td>
+                                        <td>2 / 2 / 0</td>
+                                        <td>2 / 2 / 0</td>
+
+                                    </tr>
+                                    <tr>
+
+                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
+                                        <td>Ocean View One Bedroom w/Vacation Protection Plan</td>
+                                        <td>YSB-9GJ</td>
+                                        <td>n/a&nbsp;</td>
+                                        <td>n/a&nbsp;</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+
+                                    </tr>
+                                    <tr class=" ev_xp">
+
+                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
+                                        <td>Ocean View Standard w/Vacation Protection Plan</td>
+                                        <td>YSB-W40</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+
+                                    </tr>
+                                    <tr>
+
+                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
+                                        <td>Ocean View- 2 Double Beds</td>
+                                        <td>YSB-1FS</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>1 / 1 / 0</td>
+                                        <td>1 / 1 / 0</td>
+                                        <td>1 / 1 / 0</td>
+
+                                    </tr>
+                                    <tr class=" ev_xp">
+
+                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
+                                        <td>Oceanfront 2 Bedroom - DD &amp; DD</td>
+                                        <td>YSB-8A6</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+
+                                    </tr>
+                                    <tr>
+
+                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
+                                        <td>Oceanfront 2 Bedroom DD &amp; DD w/Vacation Protection</td>
+                                        <td>YSB-5IW</td>
+                                        <td>n/a&nbsp;</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+
+                                    </tr>
+                                    <tr class=" ev_xp">
+
+                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
+                                        <td>Oceanfront Efficiency</td>
+                                        <td>YSB-9WP</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>1 / 1 / 0</td>
+                                        <td>1 / 1 / 0</td>
+                                        <td>1 / 1 / 0</td>
+
+                                    </tr>
+                                    <tr>
+
+                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
+                                        <td>Oceanfront Efficiency w/Vacation Protection Plan</td>
+                                        <td>YSB-P55</td>
+                                        <td>n/a&nbsp;</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+                                        <td>0 / 0 / 0</td>
+
+                                    </tr>
+
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+
+
+
+
+
+
+        <div class="modal fade bd-example-modal-lg" tabindex="-1" role="dialog" aria-hidden="true">
+            <div class="modal-dialog modal-xl">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h2 class="modal-title font-w500">Hotel Information- Embassy Suites Livonia 2</h2>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal">
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="fs-18 text-black font-w500">This wizard will help you with creating new inventory. Adding additional nights to an existing room type, and updating of room rates</p>
+
+                        <hr />
+                        <div class="row">
+                            <div class="col-md-8">
+
+                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
+                                    Add a new Room Category to the Embassy Suites Livonia 2 <i class="fas fa-arrow-right float-end mt-1"></i>
+                                </button>
+
+                                <button class="btn btn-primary light text-start  mb-3 w-100" onClick="showHideDiv('divMsg')">
+                                    Edit a Existing Room Category to the Embassy Suites Livonia 2 <i class="fas fa-arrow-right float-end mt-1"></i>
+                                </button>
+
+
+                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
+                                    Delete a Existing Room Category to the Embassy Suites Livonia 2 <i class="fas fa-arrow-right float-end mt-1"></i>
+                                </button>
+
+                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
+                                    Add/Edit  Room Category  Definitions for ICM <i class="fas fa-arrow-right float-end mt-1"></i>
+                                </button>
+
+                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
+                                    Add/Edit  Room Occupancy  Definitions for ICM <i class="fas fa-arrow-right float-end mt-1"></i>
+                                </button>
+
+                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
+                                    Add/Edit Special Request  Definitions for ICM <i class="fas fa-arrow-right float-end mt-1"></i>
+                                </button>
+
+
+                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
+                                    Inventory, Rate &Aacute; Deposit History for Embassy Suites Livonia 2 <i class="fas fa-arrow-right float-end mt-1"></i>
+                                </button>
+
+                            </div>
+                            <div class="col-md-4" id="divMsg" style="display:none">
+                                <div class="mb-3">
+                                    <label class="form-label">Room Category</label>
+                                    <select id="inputState" class="default-select form-control wide">
+                                        <option selected>Choose...</option>
+                                        <option>Option 1</option>
+                                        <option>Option 2</option>
+                                        <option>Option 3</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+
+                        <a href="search-list.html" type="button" class="btn btn-primary">Next</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+
+    </div>
+</div>
+<script src="~/js/Admin/RoomBlock.js?v=@DateTime.Now.Ticks.ToString()"></script>
+@*<script src="~/js/Admin/AddRoomBlock.js?v=@DateTime.Now.Ticks.ToString()"></script>*@
