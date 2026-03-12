@@ -1,330 +1,69 @@
-@*@using EventManagerWeb.Areas.Admin.Models;
-@model EventManagerWeb.Areas.Admin.Models.UserModal;
-@{
-    var data = ViewBag.objuserlist;
-
-}*@
-@using EventManagerWeb.Areas.Admin.Models;
-@using Newtonsoft.Json;
-@using Microsoft.AspNetCore.Http
-@inject IHttpContextAccessor HttpContextAccessor
-@{
-    cls_Cancellation obj_UserModal = new cls_Cancellation();
-    CutomerInfo obj_customer = new CutomerInfo();
-    string abv1 = HttpContextAccessor.HttpContext.Session.GetString("CustomerInfo");
-    obj_customer = JsonConvert.DeserializeObject<CutomerInfo>(abv1);
-    
-}
-
-<style>
-    .clmn_hide {
-       display:none;
-    }
-
-    .toolbar {
-        float: right;
-        margin-right: 4%;
-    }
-</style>
-<div class="container-fluid">
-
-   
-
-    <div class="row">
-
-        <div class="col-lg-12">
-            <div class="card">
-                <div class="card-header flex-wrap">
-                    <h4 class="card-title">Room Block Information</h4>
-                    
-                    <div class="">
-                        <a @*href="/admin/RoomBlock/AddRoomBlock"*@ onclick="AddRoomBlock()"   class="btn btn-info"><i class="fas fa-plus me-3"></i> Add Room Block</a>
-
-                    </div>
-                </div>
-				
-				 <input type="hidden" id="HTNNO_" />
-                 <input type="hidden" id="EMNNO_" />
-                <input type="hidden" value="@obj_customer.CUNISENABLE_CREATEROOMBLOCK" id="CUNISENABLE_CREATEROOMBLOCK" />
-                <div class="card-body pt-4">
-
-                   
-
-                    <div class="table-responsive">
-                        <table id="tbl_roomlock" class="table display  table-hover" style="min-width: 845px">
-                            <thead>
-                                <tr>
-                                   
-                                    <th>Action</th>
-                                    <th> Last Name</th>
-                                    <th> First Name</th>
-                                    <th>Sys BlockID</th>
-                                    <th>Blk Acro</th>
-                                    <th style='cursor:pointer;min-width:125px;'>Organization</th>
-                                    <th style='cursor:pointer;min-width:250px;'>Hotel</th>
-                                    <th >Hotel Acro</th>
-                                    <th style='cursor:pointer;min-width:200px;'>Rm Categories</th>
-                                    <th >Rm Categories Acro</th>
-                                    <th style ='cursor:pointer;min-width:150px;'>Rm Type</th>
-                                    <th >Rm Type Acro</th>
-                                    <th>Email Address</th>
-                                    <th>State</th>
-                                    <th>City</th>
-                                    <th>Address</th>
-                                    <th>Start</th>
-                                    <th>End</th>
-                                    <th class="clmn_hide">ReleaseInventory</th>
-
-                                </tr>
-                            </thead>
-
-                            <tbody>
-                            </tbody>
-                        </table>
-
-
-
-                    </div>
-                </div>
-            </div>
-
-        </div>
-
-
-
-
-        <div class="modal fade bd-example-modal-lg1" tabindex="-1" role="dialog" aria-hidden="true">
-            <div class="modal-dialog modal-xl">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h2 class="modal-title font-w500">Hotel Inventory</h2>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal">
-                        </button>
-                    </div>
-                    <div class="modal-body">
-                        <div class="table-responsive">
-                            <table id="example2" class="table display table-hover" style="min-width: 845px">
-                                <thead>
-                                    <tr>
-
-                                        <th>
-                                            Hotel
-
-                                        </th>
-                                        <th>
-                                            Room
-
-                                        </th>
-                                        <th>
-                                            Room Block
-
-                                        </th>
-                                        <th>
-                                            Jan 15 2022
-
-                                        </th>
-                                        <th>
-                                            Jan 16 2022
-
-                                        </th>
-                                        <th>
-                                            Jan 17 2022
-
-                                        </th>
-                                        <th>
-                                            Jan 18 2022
-
-                                        </th>
-                                        <th>
-                                            Jan 19 2022
-
-                                        </th>
-
-                                    </tr>
-                                </thead>
-                                <tbody>
-
-                                    <tr>
-
-                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
-                                        <td>Ocean View One Bedroom</td>
-                                        <td>YSB-1FS</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>2 / 2 / 0</td>
-                                        <td>2 / 2 / 0</td>
-                                        <td>2 / 2 / 0</td>
-
-                                    </tr>
-                                    <tr>
-
-                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
-                                        <td>Ocean View One Bedroom w/Vacation Protection Plan</td>
-                                        <td>YSB-9GJ</td>
-                                        <td>n/a&nbsp;</td>
-                                        <td>n/a&nbsp;</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-
-                                    </tr>
-                                    <tr class=" ev_xp">
-
-                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
-                                        <td>Ocean View Standard w/Vacation Protection Plan</td>
-                                        <td>YSB-W40</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-
-                                    </tr>
-                                    <tr>
-
-                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
-                                        <td>Ocean View- 2 Double Beds</td>
-                                        <td>YSB-1FS</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>1 / 1 / 0</td>
-                                        <td>1 / 1 / 0</td>
-                                        <td>1 / 1 / 0</td>
-
-                                    </tr>
-                                    <tr class=" ev_xp">
-
-                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
-                                        <td>Oceanfront 2 Bedroom - DD &amp; DD</td>
-                                        <td>YSB-8A6</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-
-                                    </tr>
-                                    <tr>
-
-                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
-                                        <td>Oceanfront 2 Bedroom DD &amp; DD w/Vacation Protection</td>
-                                        <td>YSB-5IW</td>
-                                        <td>n/a&nbsp;</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-
-                                    </tr>
-                                    <tr class=" ev_xp">
-
-                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
-                                        <td>Oceanfront Efficiency</td>
-                                        <td>YSB-9WP</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>1 / 1 / 0</td>
-                                        <td>1 / 1 / 0</td>
-                                        <td>1 / 1 / 0</td>
-
-                                    </tr>
-                                    <tr>
-
-                                        <td>Best Western PLUS Carolinian Oceanfront Inn &amp; Suites</td>
-                                        <td>Oceanfront Efficiency w/Vacation Protection Plan</td>
-                                        <td>YSB-P55</td>
-                                        <td>n/a&nbsp;</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-                                        <td>0 / 0 / 0</td>
-
-                                    </tr>
-
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-
-
-
-
-
-
-
-        <div class="modal fade bd-example-modal-lg" tabindex="-1" role="dialog" aria-hidden="true">
-            <div class="modal-dialog modal-xl">
-                <div class="modal-content">
-                    <div class="modal-header">
-                        <h2 class="modal-title font-w500">Hotel Information- Embassy Suites Livonia 2</h2>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal">
-                        </button>
-                    </div>
-                    <div class="modal-body">
-                        <p class="fs-18 text-black font-w500">This wizard will help you with creating new inventory. Adding additional nights to an existing room type, and updating of room rates</p>
-
-                        <hr />
-                        <div class="row">
-                            <div class="col-md-8">
-
-                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
-                                    Add a new Room Category to the Embassy Suites Livonia 2 <i class="fas fa-arrow-right float-end mt-1"></i>
-                                </button>
-
-                                <button class="btn btn-primary light text-start  mb-3 w-100" onClick="showHideDiv('divMsg')">
-                                    Edit a Existing Room Category to the Embassy Suites Livonia 2 <i class="fas fa-arrow-right float-end mt-1"></i>
-                                </button>
-
-
-                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
-                                    Delete a Existing Room Category to the Embassy Suites Livonia 2 <i class="fas fa-arrow-right float-end mt-1"></i>
-                                </button>
-
-                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
-                                    Add/Edit  Room Category  Definitions for ICM <i class="fas fa-arrow-right float-end mt-1"></i>
-                                </button>
-
-                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
-                                    Add/Edit  Room Occupancy  Definitions for ICM <i class="fas fa-arrow-right float-end mt-1"></i>
-                                </button>
-
-                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
-                                    Add/Edit Special Request  Definitions for ICM <i class="fas fa-arrow-right float-end mt-1"></i>
-                                </button>
-
-
-                                <button class="btn btn-primary light text-start mb-3 w-100" onClick="showHideDiv('divMsg')">
-                                    Inventory, Rate &Aacute; Deposit History for Embassy Suites Livonia 2 <i class="fas fa-arrow-right float-end mt-1"></i>
-                                </button>
-
-                            </div>
-                            <div class="col-md-4" id="divMsg" style="display:none">
-                                <div class="mb-3">
-                                    <label class="form-label">Room Category</label>
-                                    <select id="inputState" class="default-select form-control wide">
-                                        <option selected>Choose...</option>
-                                        <option>Option 1</option>
-                                        <option>Option 2</option>
-                                        <option>Option 3</option>
-                                    </select>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="modal-footer">
-
-                        <a href="search-list.html" type="button" class="btn btn-primary">Next</a>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-
-    </div>
-</div>
-<script src="~/js/Admin/RoomBlock.js?v=@DateTime.Now.Ticks.ToString()"></script>
-@*<script src="~/js/Admin/AddRoomBlock.js?v=@DateTime.Now.Ticks.ToString()"></script>*@
+      
+	   else {
+
+      var condition = $("#txtView").text() || "";
+      var encodedCondition = encodeURIComponent(condition);
+
+      let EMNNO = sessionStorage.getItem("emnno") || "";
+      let SessionId = sessionStorage.getItem("SessionId") || "";
+      let viewer = $("#ddlViewer").val() || "";
+
+      // Build inner query string that will be stored with the token
+      var innerQueryString =
+           "V=" + encodeURIComponent(viewer) +
+           "&Report=YES" +
+           "&RptId=" + encodeURIComponent(ReportId) +
+           "&EMNNO=" + encodeURIComponent(EMNNO) +
+           "&sessionid=" + encodeURIComponent(SessionId) +
+           "&Filter=" + encodedCondition;
+
+      $.ajax({
+           url: "/Admin/Reports/CreateSecureReportLink",
+           type: "POST",
+           data: { innerQueryString: innerQueryString },
+           dataType: "json",
+
+           success: function (res) {
+                var token = res && res.token;
+                if (!token) {
+                     alert("Unable to generate secure report link.");
+                     return;
+                }
+                var finalUrl = "http://localhost:50825/Report.aspx?t="
+                     + encodeURIComponent(token);
+
+                var features = "width=1000,height=800,toolbar=no,location=yes,menubar=no,resizable=yes,scrollbars=yes";
+
+                var reportWin = window.open(finalUrl, "ReportWindow", features);
+
+
+                if (!reportWin) {
+                     alert("Please allow pop-ups for this site to view reports.");
+                     return;
+                }
+
+                reportWin.focus();
+           },
+
+           error: function (xhr, status, err) {
+                console.error("CreateSecureReportLink error:", status, err, xhr.responseText);
+                alert("Sorry, unable to open report at this time.");
+           }
+      });
+
+      return;
+ }
+
+make above else part for below conditions like i dont have rptid dor now so use 9999 id for now and rest of the things you need to attached and get token  	  
+	  
+	 
+     let SessionId = sessionStorage.getItem("SessionId");
+     let EMNNO = sessionStorage.getItem("emnno");
+    var location = 'https://devreport.ttievent.com/Reports16/Confirmation.aspx?Type=Block&SUSessionID=' + SessionId + '&BlockNo=' + HBNNO
+    window.open(location, '_blank').focus()
+    return;
+
+
+
+	  
+	  
