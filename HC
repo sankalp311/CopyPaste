@@ -1,5 +1,6 @@
+@model RoomBlockConfirmationOptionsVM
 @{
-     Layout = null;   // remove this if you want to use your site layout
+     Layout = null;
 }
 
 <!DOCTYPE html>
@@ -7,52 +8,97 @@
 <head>
      <meta charset="UTF-8" />
      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-     <title>Confirmation Options</title>
+     <title>Room Block Confirmation</title>
 
      <style>
           * {
                box-sizing: border-box;
           }
 
+          :root {
+               --primary: #2563eb;
+               --primary-dark: #1d4ed8;
+               --secondary: #0f172a;
+               --muted: #6b7280;
+               --border: #dbe4f0;
+               --card: rgba(255, 255, 255, 0.94);
+               --bg1: #eef4ff;
+               --bg2: #dbeafe;
+               --success-bg: #eff6ff;
+               --success-border: #bfdbfe;
+               --shadow: 0 20px 60px rgba(15, 23, 42, 0.16);
+          }
+
           body {
                margin: 0;
-               font-family: "Segoe UI", Arial, sans-serif;
                min-height: 100vh;
-               background: linear-gradient(135deg, #eef2f7, #dfe7f3);
+               font-family: "Segoe UI", Arial, sans-serif;
+               background: radial-gradient(circle at top left, #ffffff 0%, transparent 32%), radial-gradient(circle at bottom right, #c7d2fe 0%, transparent 28%), linear-gradient(135deg, var(--bg1), var(--bg2));
                display: flex;
                align-items: center;
                justify-content: center;
-               padding: 30px 15px;
-               color: #1f2937;
+               padding: 16px 14px;
+               color: var(--secondary);
           }
 
-          .confirmation-page {
+          .page-wrap {
                width: 100%;
-               max-width: 760px;
+               max-width: 900px;
           }
 
-          .confirmation-card {
-               background: #ffffff;
-               border-radius: 16px;
-               box-shadow: 0 18px 45px rgba(0, 0, 0, 0.12);
-               border: 1px solid rgba(0, 0, 0, 0.06);
-               padding: 34px 38px 30px;
+          .card {
                position: relative;
+               overflow: hidden;
+               background: var(--card);
+               border: 1px solid rgba(255,255,255,0.6);
+               border-radius: 24px;
+               box-shadow: var(--shadow);
+               backdrop-filter: blur(10px);
+          }
+
+               .card::before {
+                    content: "";
+                    position: absolute;
+                    top: -80px;
+                    right: -80px;
+                    width: 220px;
+                    height: 220px;
+                    background: linear-gradient(135deg, rgba(37,99,235,0.18), rgba(59,130,246,0.04));
+                    border-radius: 50%;
+               }
+
+               .card::after {
+                    content: "";
+                    position: absolute;
+                    bottom: -70px;
+                    left: -70px;
+                    width: 180px;
+                    height: 180px;
+                    background: linear-gradient(135deg, rgba(29,78,216,0.12), rgba(255,255,255,0.02));
+                    border-radius: 50%;
+               }
+
+          .card-body {
+               position: relative;
+               z-index: 2;
+               padding: 24px 28px 22px;
           }
 
           .close-btn {
                position: absolute;
                top: 16px;
-               right: 18px;
-               width: 38px;
-               height: 38px;
+               right: 16px;
+               width: 40px;
+               height: 40px;
                border: none;
                border-radius: 50%;
                background: #f3f4f6;
                color: #374151;
                font-size: 24px;
+               line-height: 1;
                cursor: pointer;
                transition: all 0.2s ease;
+               z-index: 5;
           }
 
                .close-btn:hover {
@@ -60,134 +106,260 @@
                     transform: scale(1.05);
                }
 
-          .title {
-               text-align: center;
-               font-size: 30px;
+          .header {
+               margin-bottom: 16px;
+               padding-right: 48px;
+          }
+
+          .badge {
+               display: inline-flex;
+               align-items: center;
+               gap: 8px;
+               background: rgba(37, 99, 235, 0.10);
+               color: var(--primary-dark);
+               border: 1px solid rgba(37, 99, 235, 0.18);
+               font-size: 11px;
                font-weight: 700;
-               margin: 8px 0 8px;
-               color: #111827;
+               letter-spacing: 0.4px;
+               text-transform: uppercase;
+               border-radius: 999px;
+               padding: 6px 12px;
+               margin-bottom: 10px;
+          }
+
+          .title {
+               margin: 0;
+               font-size: 24px;
+               font-weight: 700;
+               color: #0f172a;
           }
 
           .subtitle {
-               text-align: center;
+               margin: 8px 0 0;
                font-size: 14px;
-               color: #6b7280;
-               margin-bottom: 30px;
+               line-height: 1.6;
+               color: var(--muted);
+               max-width: 700px;
+          }
+
+          .grid {
+               display: grid;
+               grid-template-columns: 1fr;
+               gap: 14px;
           }
 
           .section {
-               margin-bottom: 26px;
+               background: rgba(255,255,255,0.78);
+               border: 1px solid #e7edf7;
+               border-radius: 18px;
+               padding: 16px 18px;
           }
 
-          .row-inline {
+          .section-title {
+               margin: 0 0 8px;
+               font-size: 17px;
+               font-weight: 700;
+               color: #111827;
+          }
+
+          .section-desc {
+               margin: 0 0 12px;
+               font-size: 13px;
+               color: var(--muted);
+               line-height: 1.5;
+          }
+
+          .action-row {
                display: flex;
-               align-items: center;
-               gap: 14px;
                flex-wrap: wrap;
+               gap: 12px;
+               align-items: center;
           }
 
-          .action-btn {
-               min-width: 115px;
-               height: 44px;
-               border: none;
-               border-radius: 10px;
+          .action-note {
                font-size: 14px;
                font-weight: 600;
+               color: #1f2937;
+          }
+
+          .btn {
+               appearance: none;
+               border: none;
                cursor: pointer;
-               transition: all 0.2s ease;
-               box-shadow: 0 4px 10px rgba(0,0,0,0.08);
+               border-radius: 12px;
+               min-width: 122px;
+               height: 42px;
+               padding: 0 18px;
+               font-size: 13px;
+               font-weight: 700;
+               transition: all 0.22s ease;
+               display: inline-flex;
+               align-items: center;
+               justify-content: center;
+               gap: 8px;
           }
 
-          .email-btn {
-               background: linear-gradient(135deg, #2563eb, #1d4ed8);
+          .btn-primary {
                color: #fff;
+               background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+               box-shadow: 0 10px 22px rgba(37, 99, 235, 0.24);
           }
 
-               .email-btn:hover {
+               .btn-primary:hover {
                     transform: translateY(-1px);
-                    box-shadow: 0 8px 16px rgba(37, 99, 235, 0.22);
+                    box-shadow: 0 14px 26px rgba(37, 99, 235, 0.30);
                }
 
-          .print-btn {
+          .btn-light {
+               color: #111827;
                background: #ffffff;
-               color: #111827;
                border: 1px solid #d1d5db;
+               box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
           }
 
-               .print-btn:hover {
-                    background: #f9fafb;
+               .btn-light:hover {
                     transform: translateY(-1px);
+                    background: #f9fafb;
                }
-
-          .label-main {
-               font-size: 16px;
-               font-weight: 600;
-               color: #111827;
-          }
 
           .field-label {
                display: block;
                margin-bottom: 10px;
-               font-size: 16px;
-               font-weight: 600;
+               font-size: 15px;
+               font-weight: 700;
                color: #111827;
           }
 
           .textarea-wrap {
-               background: #f9fafb;
-               border: 1px solid #dbe1ea;
-               border-radius: 14px;
+               border-radius: 16px;
+               border: 1px solid var(--border);
+               background: #f8fbff;
                padding: 12px;
+               transition: border-color 0.2s ease, box-shadow 0.2s ease;
           }
+
+               .textarea-wrap:focus-within {
+                    border-color: #93c5fd;
+                    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+                    background: #ffffff;
+               }
 
           textarea {
                width: 100%;
-               min-height: 190px;
+               min-height: 160px;
+               resize: vertical;
                border: none;
                outline: none;
-               resize: vertical;
                background: transparent;
+               font-family: "Segoe UI", Arial, sans-serif;
                font-size: 15px;
                line-height: 1.7;
                color: #1f2937;
-               font-family: "Segoe UI", Arial, sans-serif;
           }
 
-          .bottom-row {
+          .footer-row {
                display: flex;
-               align-items: center;
-               gap: 14px;
                flex-wrap: wrap;
-               margin-top: 22px;
+               gap: 12px;
+               align-items: center;
+               margin-top: 4px;
           }
 
-          .note-box {
-               margin-top: 28px;
-               background: #eff6ff;
-               border: 1px solid #bfdbfe;
-               border-radius: 12px;
+          .info-box {
+               display: flex;
+               gap: 12px;
+               align-items: flex-start;
+               margin-top: 14px;
                padding: 14px 16px;
-               font-size: 14px;
+               background: var(--success-bg);
+               border: 1px solid var(--success-border);
+               border-radius: 16px;
                color: #1e40af;
           }
 
-          @@media (max-width: 576px) {
-               .confirmation-card {
-                    padding: 24px 18px 22px;
+          .info-icon {
+               flex: 0 0 auto;
+               width: 26px;
+               height: 26px;
+               border-radius: 50%;
+               background: #dbeafe;
+               display: flex;
+               align-items: center;
+               justify-content: center;
+               font-weight: 700;
+          }
+
+          .info-text {
+               font-size: 13px;
+               line-height: 1.55;
+          }
+
+          .loader-overlay {
+               position: fixed;
+               inset: 0;
+               background: rgba(15, 23, 42, 0.35);
+               display: none;
+               align-items: center;
+               justify-content: center;
+               z-index: 9999;
+               backdrop-filter: blur(3px);
+          }
+
+          .loader-box {
+               background: #ffffff;
+               border-radius: 18px;
+               padding: 22px 26px;
+               min-width: 240px;
+               text-align: center;
+               box-shadow: 0 20px 45px rgba(0,0,0,0.18);
+          }
+
+          .spinner {
+               width: 42px;
+               height: 42px;
+               margin: 0 auto 12px;
+               border: 4px solid #dbeafe;
+               border-top: 4px solid var(--primary);
+               border-radius: 50%;
+               animation: spin 0.85s linear infinite;
+          }
+
+          .loader-text {
+               font-size: 14px;
+               font-weight: 600;
+               color: #334155;
+          }
+
+          @@keyframes spin {
+               to {
+                    transform: rotate(360deg);
+               }
+          }
+
+          @@media (max-width: 768px) {
+               .card-body {
+                    padding: 20px 16px 18px;
                }
 
                .title {
-                    font-size: 24px;
-                    padding-right: 30px;
+                    font-size: 22px;
                }
 
-               .action-btn {
+               .btn {
                     width: 100%;
                }
 
-               .row-inline,
-               .bottom-row {
+               .action-row,
+               .footer-row {
                     align-items: stretch;
+               }
+
+               .action-note {
+                    width: 100%;
+               }
+
+               textarea {
+                    min-height: 140px;
                }
           }
 
@@ -197,116 +369,146 @@
                     padding: 0;
                }
 
-               .confirmation-card {
+               .card {
                     box-shadow: none;
                     border: none;
+                    background: #fff;
                }
 
                .close-btn,
-               .note-box {
+               .info-box {
                     display: none !important;
-               }
-
-               .action-btn {
-                    box-shadow: none;
                }
           }
      </style>
 </head>
 <body>
 
-     <div class="confirmation-page">
-          <div class="confirmation-card">
+     <input type="hidden" id="hdnPrintToken" value="@Model.PrintToken" />
+
+     <div class="page-wrap">
+          <div class="card">
                <button type="button" class="close-btn" onclick="closePage()">×</button>
 
-               <div class="title">Confirmation Options</div>
-               <div class="subtitle">Send or print your room block confirmation</div>
-
-               <div class="section">
-                    <div class="row-inline">
-                         <button type="button" class="action-btn email-btn" onclick="sendEmail()">EMAIL</button>
-                         <span class="label-main">Send confirmation via Email</span>
+               <div class="card-body">
+                    <div class="header">
+                         <div class="badge">Room Block Confirmation</div>
+                         <h1 class="title">Confirmation Options</h1>
+                         <p class="subtitle">
+                              Review the message below and choose whether you want to email the room block confirmation
+                              or open the printable version.
+                         </p>
                     </div>
-               </div>
 
-               <div class="section">
-                    <label for="txtMessage" class="field-label">Message to include in Emailed Confirmation</label>
+                    <div class="grid">
+                         <div class="section">
+                              <h2 class="section-title">Email Confirmation</h2>
+                              <p class="section-desc">
+                                   Send the confirmation along with the custom message entered below.
+                              </p>
 
-                    <div class="textarea-wrap">
-                         <textarea id="txtMessage">Thank you for your request for a group block at this year's Jsimple's Best Ever Test Event.
+                              <div class="action-row">
+                                   <button type="button" class="btn btn-primary" onclick="sendEmail()">EMAIL</button>
+                                   <span class="action-note">Send confirmation via email</span>
+                              </div>
+                         </div>
 
-Attached is a detailed acknowledgement of your request. Please review for accuracy.</textarea>
+                         <div class="section">
+                              <label for="txtMessage" class="field-label">Message to include in emailed confirmation</label>
+
+                              <div class="textarea-wrap">
+                                   <textarea id="txtMessage">@Model.DefaultMessage</textarea>
+                              </div>
+                         </div>
+
+                         <div class="section">
+                              <h2 class="section-title">Print Confirmation</h2>
+                              <p class="section-desc">
+                                   Open the printable confirmation in a new tab using the generated secure token.
+                              </p>
+
+                              <div class="footer-row">
+                                   <button type="button" class="btn btn-light" onclick="printPage()">PRINT</button>
+                                   <span class="action-note">Open printable confirmation</span>
+                              </div>
+                         </div>
                     </div>
-               </div>
 
-               <div class="bottom-row">
-                    <button type="button" class="action-btn print-btn" onclick="printPage()">PRINT</button>
-                    <span class="label-main">Print this confirmation</span>
-               </div>
-
-               <div class="note-box">
-                    Please review the message before sending the confirmation.
+                    <div class="info-box">
+                         <div class="info-icon">i</div>
+                         <div class="info-text">
+                              Please review the message carefully before sending the confirmation. The print option will open the confirmation in a separate tab.
+                         </div>
+                    </div>
                </div>
           </div>
      </div>
+
+     <div class="loader-overlay" id="loaderOverlay">
+          <div class="loader-box">
+               <div class="spinner"></div>
+               <div class="loader-text">Please wait...</div>
+          </div>
+     </div>
+
+     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+     <script>
+          function showLoader() {
+              document.getElementById("loaderOverlay").style.display = "flex";
+          }
+
+          function hideLoader() {
+              document.getElementById("loaderOverlay").style.display = "none";
+          }
+
+          function printPage() {
+              var token = document.getElementById("hdnPrintToken").value || "";
+              if (!token) {
+                  alert("Print token not found.");
+                  return;
+              }
+
+              var finalUrl = "http://localhost:50825/Report16/RoomBlockConfirmation.aspx?t=" + encodeURIComponent(token);
+              window.open(finalUrl, "_blank");
+          }
+
+          function sendEmail() {
+              var message = document.getElementById("txtMessage").value || "";
+
+              showLoader();
+
+              $.ajax({
+                  url: "/Admin/RoomBlock/CreateRoomBlockEmailToken",
+                  type: "POST",
+                  data: { message: message },
+                  dataType: "json",
+                  success: function (res) {
+                      hideLoader();
+
+                      var token = res && res.token;
+                      if (!token) {
+                          alert("Unable to generate email token.");
+                          return;
+                      }
+
+                      var finalUrl = "http://localhost:50825/Report16/RoomBlockConfirmation.aspx?t=" + encodeURIComponent(token);
+                      window.open(finalUrl, "_blank");
+                  },
+                  error: function (xhr, status, err) {
+                      hideLoader();
+                      console.error("CreateRoomBlockEmailToken error:", status, err, xhr.responseText);
+                      alert("Sorry, unable to send email confirmation at this time.");
+                  }
+              });
+          }
+
+          function closePage() {
+              if (window.history.length > 1) {
+                  window.history.back();
+              } else {
+                  window.close();
+              }
+          }
+     </script>
 </body>
 </html>
-
-
-
-
-function openConfirmationRDLC(HBNNO) {
-     let SessionId = sessionStorage.getItem("SessionId");
-     let EMNNO = sessionStorage.getItem("emnno");
-     // window.location.href = '/admin/roomblock/roomblockconfirmationrdlc?BlockNo=' + HBNNO;
-     debugger;
-     window.location.href = "/admin/roomblock/roomblockconfirmationrdlc/" + HBNNO;
-
-     var targetUrl =
-          //    "https://devreport.ttievent.com/Reports16/Confirmation.aspx?Type=Block" +
-          "Type=Block"+
-          "&RptID=99999999" +
-          "&EMNNO=" + encodeURIComponent(EMNNO) +
-          "&SUSessionID=" + encodeURIComponent(SessionId) +
-          "&BlockNo=" + encodeURIComponent(HBNNO);
-
-     var win = window.open("", "_blank");
-
-     if (!win) {
-          alert("Please allow pop-ups for this site.");
-          return;
-     }
-
-     $.ajax({
-          url: "/Admin/Reports/CreateSecureReportLink",
-          type: "POST",
-          data: { innerQueryString: targetUrl },
-          dataType: "json",
-          success: function (res) {
-               var token = res && res.token;
-               if (!token) {
-                    win.close();
-                    alert("Unable to generate secure confirmation link.");
-                    return;
-               }
-
-               var finalUrl = "http://localhost:50825/Report16/RoomBlockConfirmation.aspx?t=" + encodeURIComponent(token);
-               win.location.href = finalUrl;
-               win.focus();
-          },
-          error: function (xhr, status, err) {
-               win.close();
-               console.error("CreateSecureReportLink error:", status, err, xhr.responseText);
-               alert("Sorry, unable to open report at this time.");
-          }
-     });
-}
-
-
-
-now gpt i have this html and js function and you need to call 
-each param in c# and make that flow working with all encryption and CreateSecureReportLink this will remaim same .
-
-AND make functionality for email click so  then add Email=YES 
-
-so please write the correct floe now.
