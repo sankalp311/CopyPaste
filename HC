@@ -1,7 +1,124 @@
-https://135.148.171.32:8443/svn/ICM_RDLC_Prod/Sankalp
+RoomBlockModal.Action 
 
-code has been commited to above briacn for prod RDLC reports
+"<div class=""dropdown"">       
+        <button type=""button"" class=""btn btn-primary light sharp"" data-bs-toggle=""dropdown"">                                                 
+            <svg width=""20px"" height=""20px"" viewBox=""0 0 24 24"" version=""1.1"">                                                
+                <g stroke=""none"" stroke-width=""1"" fill=""none"" fill-rule=""evenodd"">      
+                    <rect x=""0"" y=""0"" width=""24"" height=""24"" />      
+                    <circle fill=""#000000"" cx=""5"" cy=""12"" r=""2"" />                                                
+                    <circle fill=""#000000"" cx=""12"" cy=""12"" r=""2"" />      
+                    <circle fill=""#000000"" cx=""19"" cy=""12"" r=""2"" />      
+                </g>      
+            </svg>       
+        </button>       
+        <div class=""dropdown-menu"">                                                 
+            <a href=""/admin/RoomBlock/RoomBlock?Action=EDIT&ID=22990""       
+               id=""22990"" class=""dropdown-item""> Edit</a>          
+            <a onclick=""RoomBlockConfirmationToEmail(22990);""       
+               class=""dropdown-item""> Confirmation</a>   
+			   <a onclick=""openConfirmationRDLC(22990)"" class=""dropdown-item"">
+				 Confirmation RDLC
+			   </a>
+        </div>                      
+    </div>"
 
-Domain (appreport2.ttievents.com)
 
-Thanks
+
+	public async Task<IActionResult> BindGrid(int EMNNO, int HTNNO, int Status)
+   {
+       RoomBlockWithHotelEvent obj = new RoomBlockWithHotelEvent();
+       obj.HTNNO = HTNNO;
+       obj.EMNNO = EMNNO;
+       obj.Status = Status;
+       HttpContext.Session.SetString("HTNNO", JsonConvert.SerializeObject(obj));
+       var Result = await _eRepo.BindRoomBlockGrid(obj);
+       return this.Ok(Result);
+   }
+
+
+in this 
+Result
+value 
+i want to encrypt it before sending on html
+
+below is my encrypt/decrypt method so you just need to call with key
+
+so in action 
+ <a onclick=""openConfirmationRDLC(22990)"" class=""dropdown-item"">
+				 Confirmation RDLC
+			   </a>
+			   i want to encrypt this value 22990 thats it
+
+
+
+
+using EventManagerWeb.Repository.IRepository;
+using Microsoft.Extensions.Configuration;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
+using System.Web;
+using System.Web.Mvc;
+
+namespace EventManagerWeb.Areas.Security
+{
+    public class DataProtection
+    {
+      
+        public  string Encrypt(string clearText)
+        {
+            var EncryptionKey = new ConfigurationBuilder().SetBasePath(Directory.GetCurrentDirectory()).AddJsonFile("appsettings.json").Build();
+            //var EncryptionKey = Convert.ToString(_configuration["EncryptionKey"]);
+          //  string EncryptionKey = "STRIKERS9072314";
+            byte[] clearBytes = Encoding.Unicode.GetBytes(clearText);
+            using (Aes encryptor = Aes.Create())
+            {
+                Rfc2898DeriveBytes pdb = new Rfc2898DeriveBytes(EncryptionKey["EncryptionKey"], new byte[]
+                { 0x49, 0x76, 0x61, 0x6e, 0x20, 0x4d, 0x65, 0x64, 0x76, 0x65, 0x64, 0x65, 0x76 });
+                encryptor.Key = pdb.GetBytes(32);
+                encryptor.IV = pdb.GetBytes(16);
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    using (CryptoStream cs =
+                    new CryptoStream(ms, encryptor.CreateEncryptor(), CryptoStreamMode.Write))
+                    {
+                        cs.Write(clearBytes, 0, clearBytes.Length);
+                        cs.Close();
+                    }
+                    clearText = Convert.ToBase64String(ms.ToArray());
+                }
+            }
+            return clearText;
+        }
+
+        public  string Decrypt(string cipherText)
+        {
+            var EncryptionKey = new ConfigurationBuilder().SetBasePath(Directory.GetCurrentDirectory()).AddJsonFile("appsettings.json").Build();
+            // string EncryptionKey = "STRIKERS9072314";
+            byte[] cipherBytes = Convert.FromBase64String(cipherText);
+            using (Aes encryptor = Aes.Create())
+            {
+                Rfc2898DeriveBytes pdb = new Rfc2898DeriveBytes(EncryptionKey["EncryptionKey"], new byte[]
+                { 0x49, 0x76, 0x61, 0x6e, 0x20, 0x4d, 0x65, 0x64, 0x76, 0x65, 0x64, 0x65, 0x76 });
+                encryptor.Key = pdb.GetBytes(32);
+                encryptor.IV = pdb.GetBytes(16);
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    using (CryptoStream cs =
+                    new CryptoStream(ms, encryptor.CreateDecryptor(), CryptoStreamMode.Write))
+                    {
+                        cs.Write(cipherBytes, 0, cipherBytes.Length);
+                        cs.Close();
+                    }
+                    cipherText = Encoding.Unicode.GetString(ms.ToArray());
+                }
+            }
+            return cipherText;
+        }
+    }
+}
+
+
