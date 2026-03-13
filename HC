@@ -1,782 +1,901 @@
-using Microsoft.Reporting.WebForms;
+using EventManagerWeb.Areas.Admin.Models;
+using EventManagerWeb.Areas.Security;
+using EventManagerWeb.Filter;
+using EventManagerWeb.Models;
+using EventManagerWeb.Repository.IRepository;
+using Grpc.Core;
+using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.WebUtilities;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
-using System.Collections.Specialized;
-using System.Configuration;
-using System.Data;
-using System.Data.SqlClient;
-using System.Globalization;
-using System.IO;
 using System.Linq;
-using System.Net;
-using System.Net.Mail;
-using System.Text;
-using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using System.Web;
-using System.Web.UI;
-using System.Xml.Linq;
 
-namespace ReportRDLC.Report16
+namespace EventManagerWeb.Areas.Admin.Controllers
 {
-     public partial class RoomBlockConfirmation : Page
-     {
-          #region ===== Constants / Fields ==========================================================
+    [AuthorizationFilter]
+    public class RoomBlockController : Controller
+    {
+        private readonly IHotelAdminRepository _hRepo;
+        private readonly IReservationRepositry _rsRepo;
+        private readonly IRoomBlockRepository _eRepo;
+		private readonly IReportsRepository _reRepo;
+		RoomBlockModal objRoomBlock = new RoomBlockModal();
+        DataProtection dataProtection = new DataProtection();
+        public RoomBlockController(IRoomBlockRepository eRepo, IReservationRepositry rsRepo, IHotelAdminRepository hRepo, IReportsRepository reRepo)
+        {
+            _eRepo = eRepo;
+            _rsRepo = rsRepo;
+            _hRepo = hRepo;
+             _reRepo = reRepo;
+        }
+        public async Task<IActionResult> Index(int HTNNO)
+        {
+            cls_Cancellation obj = new cls_Cancellation();
 
-          private const string RDLC_VIRTUAL_PATH = "~/Report16/RoomBlockConfirmation.rdlc";
-          private const string SP_NAME = "ICM.dbo.sp_ICM_RPT_RoomBlockConfirmation_RDLC";
+            string QueryString = Request.QueryString.ToString().Replace('?', ' ');
+            //var DecryptVal = dataProtection.Decrypt(QueryString);
+            //// string originalValue = Encrypt(key);
 
-          private const string RDLC_DATASET_NAME_1 = "DS_TTSbBk112";
-          private const string RDLC_DATASET_NAME_2 = "DataSet2";
-          private const string RDLC_DATASET_NAME_3 = "DataSet3";
+            //if (DecryptVal != "" )
+            //{              
+            //    string[] keyValuePairs = DecryptVal.Split('&');
+            //    string key1 = keyValuePairs[0].Trim();
+            //    string[] parts1 = key1.Split('=');
+            //    string DecrpHTNNO1 = parts1[1].Trim();
+            //    obj.HTNNO = Convert.ToInt16(DecrpHTNNO1);
+            //}
 
-          private const string DEFAULT_PAGE_WIDTH = "9.5in";
 
-          private NameValueCollection _secureQs;
-          private string _secureToken;
-          private bool _secureQsInitialized = false;
+            //HttpContext.Session.SetString("HTNNO", JsonConvert.SerializeObject(obj));
+            return View();
+        }
+		//public async Task<IActionResult BindGrid(string obj)
+		//{
+		//    var Result = _eRepo.BindRoomBlockGrid(obj);
+		//    return this.Ok(Result);
+		//}
+
+		[HttpPost]
+		public IActionResult BuildConfirmationToken(int hbnno, string emnno, string sessionId)
+		{
+			try
+			{
+				var dp = new DataProtection();
+
+				string payload =
+				    "Type=" + Uri.EscapeDataString("Block") +
+				    "&RptID=" + Uri.EscapeDataString("99999999") +
+				    "&EMNNO=" + Uri.EscapeDataString(emnno ?? "") +
+				    "&SUSessionID=" + Uri.EscapeDataString(sessionId ?? "") +
+				    "&BlockNo=" + Uri.EscapeDataString(hbnno.ToString());
+
+				string encrypted = dp.Encrypt(payload);
+				string safeToken = Uri.EscapeDataString(encrypted);
+
+				return Ok(new { token = safeToken });
+			}
+			catch (Exception ex)
+			{
+				return BadRequest(ex.Message);
+			}
+		}
 
 
-          private sealed class ReportRequestRow
+		[HttpGet]
+		[Route("admin/roomblock/RoomBlockConfirmationRDLC/{token}")]
+		public async Task<IActionResult> RoomBlockConfirmationRDLC(string token)
+		{
+			try
+			{
+				var dp = new DataProtection();
+
+				string decrypted = dp.Decrypt(Uri.UnescapeDataString(token));
+
+				var query = QueryHelpers.ParseQuery("?" + decrypted);
+
+				string type = query.ContainsKey("Type") ? query["Type"].ToString() : "Block";
+				string rptId = query.ContainsKey("RptID") ? query["RptID"].ToString() : "99999999";
+				string emnno = query.ContainsKey("EMNNO") ? query["EMNNO"].ToString() : "";
+				string sessionId = query.ContainsKey("SUSessionID") ? query["SUSessionID"].ToString() : "";
+				string blockNo = query.ContainsKey("BlockNo") ? query["BlockNo"].ToString() : "";
+
+				string baseInnerQuery =
+				    "Type=" + Uri.EscapeDataString(type) +
+				    "&RptID=" + Uri.EscapeDataString(rptId) +
+				    "&EMNNO=" + Uri.EscapeDataString(emnno) +
+				    "&SUSessionID=" + Uri.EscapeDataString(sessionId) +
+				    "&BlockNo=" + Uri.EscapeDataString(blockNo);
+
+				// keep for EMAIL click
+				HttpContext.Session.SetString("RoomBlockConfirmBaseInnerQuery", baseInnerQuery);
+
+				// call repo directly here
+				var printToken = await _reRepo.CreateSecureReportLink(baseInnerQuery);
+
+				if (string.IsNullOrWhiteSpace(printToken))
+					return StatusCode(500, "Failed to create secure report token.");
+
+				var model = new RoomBlockConfirmationOptionsVM
+				{
+					PrintToken = printToken,
+					DefaultMessage = @"Thank you for your request for a group block at this year's Jsimple's Best Ever Test Event.
+
+Attached is a detailed acknowledgement of your request. Please review for accuracy."
+				};
+
+				return View("~/Areas/Admin/Views/RoomBlock/RoomBlockConfirmationRDLC.cshtml", model);
+			}
+			catch (Exception ex)
+			{
+				return BadRequest("Invalid confirmation token. " + ex.Message);
+			}
+		}
+
+
+		[HttpPost]
+		public async Task<IActionResult> CreateRoomBlockEmailToken(string message)
+		{
+			try
+			{
+				string baseInnerQuery = HttpContext.Session.GetString("RoomBlockConfirmBaseInnerQuery");
+
+				if (string.IsNullOrWhiteSpace(baseInnerQuery))
+					return BadRequest(new { message = "Session expired. Please open confirmation again." });
+
+				string emailInnerQuery =
+				    baseInnerQuery +
+				    "&Email=YES" +
+				    "&Message=" + Uri.EscapeDataString(message ?? "");
+
+				var token = await _reRepo.CreateSecureReportLink(emailInnerQuery, message, null);
+
+				if (string.IsNullOrWhiteSpace(token))
+					return StatusCode(500, new { message = "Failed to create secure email token." });
+
+				return Json(new { token });
+			}
+			catch (Exception ex)
+			{
+				return BadRequest(new { message = ex.Message });
+			}
+		}
+
+
+		public async Task<IActionResult> BindGrid(int EMNNO, int HTNNO, int Status)
           {
-               public string InnerQueryString { get; set; }
-               public string EmailTemplate { get; set; }
+               RoomBlockWithHotelEvent obj = new RoomBlockWithHotelEvent();
+               obj.HTNNO = HTNNO;
+               obj.EMNNO = EMNNO;
+               obj.Status = Status;
+               HttpContext.Session.SetString("HTNNO", JsonConvert.SerializeObject(obj));
+               var Result = await _eRepo.BindRoomBlockGrid(obj);
+               return this.Ok(Result);
           }
 
-          #endregion
+          //		public async Task<IActionResult> BindGrid(int EMNNO, int HTNNO, int Status)
+          //		{
+          //			RoomBlockWithHotelEvent obj = new RoomBlockWithHotelEvent();
+          //			obj.HTNNO = HTNNO;
+          //			obj.EMNNO = EMNNO;
+          //			obj.Status = Status;
+
+          //			HttpContext.Session.SetString("HTNNO", JsonConvert.SerializeObject(obj));
+
+          //			var Result = await _eRepo.BindRoomBlockGrid(obj);
+
+          //			var dp = new DataProtection();
+
+          //			foreach (var item in Result)
+          //			{
+          //				string plainText = "BlockNo=" + item.ID;   // or item.BlockNo
+          //				string encrypted = dp.Encrypt(plainText);
+          //				string safeToken = Uri.EscapeDataString(encrypted);
+
+          //				item.Action = $@"
+          //<div class=""dropdown"">       
+          //    <button type=""button"" class=""btn btn-primary light sharp"" data-bs-toggle=""dropdown"">                                                 
+          //        <svg width=""20px"" height=""20px"" viewBox=""0 0 24 24"" version=""1.1"">                                                
+          //            <g stroke=""none"" stroke-width=""1"" fill=""none"" fill-rule=""evenodd"">      
+          //                <rect x=""0"" y=""0"" width=""24"" height=""24"" />      
+          //                <circle fill=""#000000"" cx=""5"" cy=""12"" r=""2"" />                                                
+          //                <circle fill=""#000000"" cx=""12"" cy=""12"" r=""2"" />      
+          //                <circle fill=""#000000"" cx=""19"" cy=""12"" r=""2"" />      
+          //            </g>      
+          //        </svg>       
+          //    </button>       
+          //    <div class=""dropdown-menu"">                                                 
+          //        <a href=""/admin/RoomBlock/RoomBlock?Action=EDIT&ID={item.ID}""
+          //           id=""{item.ID}"" class=""dropdown-item"">Edit</a>          
+          //        <a onclick=""RoomBlockConfirmationToEmail({item.ID});""
+          //           class=""dropdown-item"">Confirmation</a>   
+          //        <a onclick=""openConfirmationRDLC('{safeToken}')"" class=""dropdown-item"">
+          //            Confirmation RDLC
+          //        </a>
+          //    </div>                      
+          //</div>";
+          //			}
+
+          //			return Ok(Result);
+          //		}
+
+          public IActionResult RoomBlock()
+        {
+            return View();
+        }
+        public async Task<IActionResult> EditRoomBlock(string obj)
+        {
+            cls_HotelInfo obj1 = new cls_HotelInfo();
+            var Result = await _eRepo.EditRoomBlock(obj);
+            if (Result == null)
+            {
+                Result = null;
+
+            }
+            else
+            {
+                obj1.HTNNO = Result.objgetroomblock.HTNNO;
+                var hotelDetails = await _hRepo.GetHotelInfoList(obj1);
+                HttpContext.Session.SetString("HTDTCUTOFF", hotelDetails[0].HTDTCUTOFF);
+            }
+
+            return this.Ok(Result);
+        }
+
+
+        [HttpPost]
+        public async Task<IActionResult> UpdateRoomBlock(GetRoomBlockModel obj)
+        {
+            var Result = await _eRepo.UpdateRoomBlock(obj);
+            return this.Ok(Result);
+        }
+        //[HttpPost]
+        //public async Task<IActionResult> UpdateRoomBlock(string _UpdateQuery)
+        //{
+        //    RoomBlockModel obj = new RoomBlockModel();
+        //    obj.HBNNO = HttpContext.Request.Query["ID"].ToString();
+        //    obj.UpdateQuery = _UpdateQuery;
+        //    var Result = await _eRepo.UpdateRoomBlock(obj);
+        //    return this.Ok(Result);
+        //}
+
+
+        public async Task<IActionResult> AddRoomBlock()
+        {           
+            //var jsonString = TempData["obj"];
+            //TempData["obj"] = jsonString;
+            // TempData.Keep();
+            //var obj_HotelList = JsonConvert.DeserializeObject<RoomBlock>((string)jsonString);
+
+            var obj = TempData["obj"];
+            TempData["obj"] = obj;
+            TempData.Keep();
+            var obj1 = JsonConvert.DeserializeObject<RoomBlockMode>((string)obj);
+          
+            var obj_HotelList = await _rsRepo.AddReservation(obj1);
+            string data = JsonConvert.SerializeObject(obj_HotelList);
+            var obj_HotelList1 = JsonConvert.DeserializeObject<RoomBlock>((string)data);
+            return View(obj_HotelList1);
 
-          #region ===== Page Load ===================================================================
+        }
 
-          protected void Page_Load(object sender, EventArgs e)
-          {
-               Server.ScriptTimeout = 3600;
+        [HttpPost]
+        public async Task<IActionResult> AddRoomBloks(RoomBlockMode obj)
+        {
 
-               InitSecureQueryFromToken();
+            var Hotel_Cat_Occ_details = await _rsRepo.AddReservation(obj);
+            // string data = JsonConvert.SerializeObject(Hotel_Cat_Occ_details);
+            TempData["obj"] = JsonConvert.SerializeObject(obj);
+            TempData.Keep();
+            return this.Ok(Hotel_Cat_Occ_details);
+        }
 
-               string rawToken = (Request.QueryString["t"] ?? Convert.ToString(RouteData.Values["t"]) ?? "").Trim();
-               _secureToken = rawToken;
 
-               if (!string.IsNullOrEmpty(rawToken) && _secureQs == null)
-               {
-                    WriteAndEnd("For security reasons, this Room Block Confirmation link is no longer active or appears incorrect.");
-                    return;
-               }
+        [HttpPost]
+        public async Task<IActionResult> AddRoomBloks1(RoomBlockMode obj)
+        {
 
-               if (IsPostBack) return;
+            var Hotel_Cat_Occ_details = await _rsRepo.AddReservation1(obj);
+            //  string data = JsonConvert.SerializeObject(Hotel_Cat_Occ_details);
+            
+            TempData["obj"] = JsonConvert.SerializeObject(obj); 
+            TempData.Keep();
+            return this.Ok(Hotel_Cat_Occ_details);
+        }
 
-               ProcessRequest();
-          }
 
-          #endregion
+        [HttpPost]
+        public async Task<IActionResult> SaveRoomBlocks(AddRoomBlock obj)
+        {
 
-          #region ===== Main Flow ===================================================================
+            var result = await _eRepo.SaveRoomBlocks(obj);
+            // string data = JsonConvert.SerializeObject(Hotel_Cat_Occ_details);
+            //TempData["obj"] = data;
+            //TempData.Keep();
+            return this.Ok(result);
+        }
 
-          private void ProcessRequest()
-          {
-               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
 
-               try
-               {
-                    string type = (Q("Type") ?? "").Trim();
-                    string sessionId = FirstNonEmpty(Q("SUSessionID"), Q("sessionid")).Trim();
-                    string blockNo = (Q("BlockNo") ?? "").Trim();
-                    string emnno = (Q("EMNNO") ?? "").Trim();
-                    string emailFlag = (Q("Email") ?? "").Trim();
+        [HttpPost]
+        public async Task<IActionResult> UnApproveRoomBlock(int HBNNO)
+        {
+            unApproved obj = new unApproved();
+            obj.USNNO = Convert.ToInt32(HttpContext.Session.GetString("USNNO"));
+            obj.HBNNO = HBNNO;
+            var Result = await _eRepo.UnApproveRoomBlock(obj);
+            return this.Ok(Result);
+        }
 
-                    TraceLog("ENTER ProcessRequest | Type=" + type + " | EMNNO=" + emnno + " | BlockNo=" + blockNo + " | Email=" + emailFlag, null, "ENTER");
 
-                    if (!"Block".Equals(type, StringComparison.OrdinalIgnoreCase))
-                    {
-                         WriteAndEnd("Invalid Type. Expected Type=Block.");
-                         return;
-                    }
 
-                    if (string.IsNullOrWhiteSpace(sessionId))
-                    {
-                         WriteAndEnd("Missing session.");
-                         return;
-                    }
+        [HttpPost]
+        public async Task<IActionResult> ActiveInactiveHistory(ActiveInactive obj)
+        {
+            var Result = await _eRepo.ActiveInactiveHistory(obj);
+            return this.Ok(Result);
+        }
 
-                    if (!ValidateSessionId(sessionId, cs))
-                    {
-                         WriteAndEnd("Invalid session!");
-                         return;
-                    }
+    }
 
-                    int emnnoInt;
-                    if (!int.TryParse(emnno, out emnnoInt) || emnnoInt <= 0)
-                    {
-                         WriteAndEnd("Invalid EMNNO.");
-                         return;
-                    }
-
-                    int hbnno;
-                    if (!int.TryParse(blockNo, out hbnno) || hbnno <= 0)
-                    {
-                         WriteAndEnd("Invalid BlockNo/HBNNO.");
-                         return;
-                    }
-
-                    DataSet ds = GetDataFromSp(cs, emnnoInt, hbnno);
-
-                    if (ds == null || ds.Tables.Count == 0)
-                    {
-                         WriteAndEnd("No data returned from stored procedure.");
-                         return;
-                    }
-
-                    if (!HasAnyRows(ds))
-                    {
-                         WriteAndEnd("No data found for the supplied EMNNO and BlockNo.");
-                         return;
-                    }
-
-                    string pdfFileName = "RoomBlockConfirmation_" + emnnoInt + "_" + hbnno + ".pdf";
-                    byte[] pdfBytes = BuildPdfBytes(ds, emnnoInt, hbnno);
-
-                    if (pdfBytes == null || pdfBytes.Length == 0)
-                    {
-                         WriteAndEnd("Failed to generate PDF.");
-                         return;
-                    }
-
-                    // Email mode: fetch HBCEMAIL from HOTELROOMBLOCKS and send ONLY email
-                    if (IsYes(emailFlag))
-                    {
-                         string toEmail = GetHotelRoomBlockEmail(cs, hbnno);
-
-                         if (string.IsNullOrWhiteSpace(toEmail))
-                         {
-                              WriteAndEnd("No email found in HOTELROOMBLOCKS (HBCEMAIL) for this BlockNo.");
-                              return;
-                         }
-
-                         SendPdfByEmail(
-                             pdfBytes,
-                             pdfFileName,
-                             toEmail,
-                             "Room Block Confirmation - EMNNO " + emnnoInt + " | BlockNo " + hbnno,
-                             "Please find attached the Room Block Confirmation PDF."
-                         );
-
-                         TraceLog("Email sent successfully to " + toEmail, null, "EMAIL");
-
-                         // IMPORTANT: do not render PDF in email mode
-                         WriteAndEnd("Email sent successfully.");
-                         return;
-                    }
-
-                    // Normal mode: render PDF inline
-                    StreamPdfInline(pdfBytes, pdfFileName);
-
-                    TraceLog("EXIT ProcessRequest", null, "EXIT");
-               }
-               catch (Exception ex)
-               {
-                    Exception root = GetRootException(ex);
-                    TraceLog("ProcessRequest ERROR", root, "ERROR");
-                    WriteAndEnd(root.Message);
-               }
-          }
-
-          #endregion
-
-          #region ===== Data Fetch ===================================================================
-
-          private DataSet GetDataFromSp(string cs, int emnno, int hbnno)
-          {
-               TraceLog("ENTER GetDataFromSp | EMNNO=" + emnno + " | HBNNO=" + hbnno, null, "ENTER");
-
-               DataSet ds = new DataSet();
-
-               using (SqlConnection con = new SqlConnection(cs))
-               using (SqlCommand cmd = new SqlCommand(SP_NAME, con))
-               {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.CommandTimeout = 3600;
-
-                    cmd.Parameters.Add("@EMNNO", SqlDbType.Int).Value = emnno;
-                    cmd.Parameters.Add("@HBNNO", SqlDbType.Int).Value = hbnno;
-
-                    using (SqlDataAdapter da = new SqlDataAdapter(cmd))
-                    {
-                         da.Fill(ds);
-                    }
-               }
-
-               TraceLog("EXIT GetDataFromSp | Tables=" + ds.Tables.Count, null, "EXIT");
-               return ds;
-          }
-
-          private string GetHotelRoomBlockEmail(string cs, int hbnno)
-          {
-               const string sql = @"
-                SELECT TOP 1 LTRIM(RTRIM(HBCEMAIL))
-                FROM dbo.HOTELROOMBLOCKS
-                WHERE HBNNO = @HBNNO
-                  AND ISNULL(LTRIM(RTRIM(HBCEMAIL)), '') <> ''";
-
-               using (SqlConnection con = new SqlConnection(cs))
-               using (SqlCommand cmd = new SqlCommand(sql, con))
-               {
-                    cmd.CommandType = CommandType.Text;
-                    cmd.Parameters.Add("@HBNNO", SqlDbType.Int).Value = hbnno;
-
-                    con.Open();
-                    object o = cmd.ExecuteScalar();
-
-                    if (o == null || o == DBNull.Value)
-                         return "";
-
-                    return Convert.ToString(o).Trim();
-               }
-          }
-
-          #endregion
-
-          #region ===== PDF Build ====================================================================
-
-          private byte[] BuildPdfBytes(DataSet spResult, int emnno, int hbnno)
-          {
-               if (spResult == null)
-                    throw new InvalidOperationException("No dataset returned.");
-
-               if (spResult.Tables.Count == 0)
-                    throw new InvalidOperationException("Stored procedure returned no result sets.");
-
-               if (!HasAnyRows(spResult))
-                    throw new InvalidOperationException("No rows returned for report.");
-
-               string rdlcPath = Server.MapPath(NormalizeRdlcPath(RDLC_VIRTUAL_PATH));
-               if (!File.Exists(rdlcPath))
-                    throw new FileNotFoundException("RDLC not found: " + rdlcPath);
-
-               BindRoomBlockReport(rdlcPath, spResult, emnno, hbnno);
-
-               string mimeType;
-               string encoding;
-               string extension;
-               string[] streams;
-               Warning[] warnings;
-
-               string deviceInfo = $@"<DeviceInfo>
-  <OutputFormat>PDF</OutputFormat>
-  <PageWidth>{DEFAULT_PAGE_WIDTH}</PageWidth>
-  <MarginTop>0.25in</MarginTop>
-  <MarginLeft>0.25in</MarginLeft>
-  <MarginRight>0.25in</MarginRight>
-  <MarginBottom>0.25in</MarginBottom>
-</DeviceInfo>";
-
-               byte[] bytes = rv.LocalReport.Render(
-                   "PDF",
-                   deviceInfo,
-                   out mimeType,
-                   out encoding,
-                   out extension,
-                   out streams,
-                   out warnings
-               );
-
-               return bytes;
-          }
-
-          private void BindRoomBlockReport(string rdlcPhysicalPath, DataSet ds, int emnno, int hbnno)
-          {
-               if (ds == null)
-                    throw new InvalidOperationException("DataSet is null.");
-
-               string xml = File.ReadAllText(rdlcPhysicalPath);
-
-               rv.Reset();
-               rv.ProcessingMode = ProcessingMode.Local;
-
-               using (StringReader sr = new StringReader(xml))
-               {
-                    rv.LocalReport.LoadReportDefinition(sr);
-               }
-
-               rv.LocalReport.EnableHyperlinks = true;
-               rv.LocalReport.DataSources.Clear();
-
-               rv.LocalReport.DataSources.Add(new ReportDataSource(RDLC_DATASET_NAME_1, GetTableOrEmpty(ds, 0)));
-               rv.LocalReport.DataSources.Add(new ReportDataSource(RDLC_DATASET_NAME_2, GetTableOrEmpty(ds, 1)));
-               rv.LocalReport.DataSources.Add(new ReportDataSource(RDLC_DATASET_NAME_3, GetTableOrEmpty(ds, 2)));
-
-               SetReportParametersFromData(ds, emnno, hbnno);
-
-               rv.LocalReport.Refresh();
-          }
-
-          private void SetReportParametersFromData(DataSet ds, int emnno, int hbnno)
-          {
-               var reportParams = rv.LocalReport.GetParameters();
-               if (reportParams == null || reportParams.Count == 0)
-                    return;
-
-               List<DataTable> orderedTables = ds.Tables
-                   .Cast<DataTable>()
-                   .Where(t => t != null)
-                   .OrderBy(t => t.Rows.Count == 1 ? 0 : 1)
-                   .ThenBy(t => t.Rows.Count == 0 ? 1 : 0)
-                   .ToList();
-
-               List<ReportParameter> toSet = new List<ReportParameter>();
-
-               foreach (ReportParameterInfo pInfo in reportParams)
-               {
-                    string value = null;
-                    string paramName = (pInfo.Name ?? "").Trim();
-
-                    if (paramName.Equals("EMNNO", StringComparison.OrdinalIgnoreCase))
-                    {
-                         value = emnno.ToString(CultureInfo.InvariantCulture);
-                    }
-                    else if (
-                        paramName.Equals("HBNNO", StringComparison.OrdinalIgnoreCase) ||
-                        paramName.Equals("BlockNo", StringComparison.OrdinalIgnoreCase)
-                    )
-                    {
-                         value = hbnno.ToString(CultureInfo.InvariantCulture);
-                    }
-
-                    if (string.IsNullOrWhiteSpace(value))
-                    {
-                         object raw = FindParameterValueFromTables(orderedTables, paramName);
-                         value = FormatForParam(raw, pInfo.DataType);
-                    }
-
-                    if (string.IsNullOrWhiteSpace(value))
-                    {
-                         string qv = Q(paramName);
-                         if (!string.IsNullOrWhiteSpace(qv))
-                              value = qv.Trim();
-                    }
-
-                    if (string.IsNullOrWhiteSpace(value))
-                    {
-                         switch (pInfo.DataType)
-                         {
-                              case ParameterDataType.Integer:
-                                   value = "0";
-                                   break;
-                              case ParameterDataType.Float:
-                                   value = "0";
-                                   break;
-                              case ParameterDataType.Boolean:
-                                   value = "False";
-                                   break;
-                              case ParameterDataType.DateTime:
-                                   value = DateTime.Now.ToString("s", CultureInfo.InvariantCulture);
-                                   break;
-                              default:
-                                   value = "";
-                                   break;
-                         }
-                    }
-
-                    toSet.Add(new ReportParameter(paramName, value));
-               }
-
-               rv.LocalReport.SetParameters(toSet);
-          }
-
-          private object FindParameterValueFromTables(IEnumerable<DataTable> tables, string paramName)
-          {
-               if (tables == null || string.IsNullOrWhiteSpace(paramName))
-                    return null;
-
-               string bareName = paramName.Trim().TrimStart('@');
-               string withAt = "@" + bareName;
-
-               foreach (DataTable t in tables)
-               {
-                    if (t == null || t.Rows.Count == 0 || t.Columns.Count == 0)
-                         continue;
-
-                    if (t.Columns.Contains(paramName))
-                         return t.Rows[0][paramName];
-
-                    if (t.Columns.Contains(bareName))
-                         return t.Rows[0][bareName];
-
-                    if (t.Columns.Contains(withAt))
-                         return t.Rows[0][withAt];
-
-                    foreach (DataColumn c in t.Columns)
-                    {
-                         string col = (c.ColumnName ?? "").Trim();
-
-                         if (col.Equals(paramName, StringComparison.OrdinalIgnoreCase) ||
-                             col.Equals(bareName, StringComparison.OrdinalIgnoreCase) ||
-                             col.Equals(withAt, StringComparison.OrdinalIgnoreCase))
-                         {
-                              return t.Rows[0][c.ColumnName];
-                         }
-                    }
-               }
-
-               return null;
-          }
-
-          private static string FormatForParam(object raw, ParameterDataType type)
-          {
-               if (raw == null || raw == DBNull.Value) return null;
-
-               switch (type)
-               {
-                    case ParameterDataType.Integer:
-                         {
-                              int i;
-                              if (int.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture), out i))
-                                   return i.ToString(CultureInfo.InvariantCulture);
-                              return null;
-                         }
-
-                    case ParameterDataType.Float:
-                         {
-                              double d;
-                              if (double.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture), NumberStyles.Any, CultureInfo.InvariantCulture, out d))
-                                   return d.ToString(CultureInfo.InvariantCulture);
-                              return null;
-                         }
-
-                    case ParameterDataType.DateTime:
-                         {
-                              DateTime dt;
-                              if (raw is DateTime)
-                                   return ((DateTime)raw).ToString("s", CultureInfo.InvariantCulture);
-
-                              if (DateTime.TryParse(Convert.ToString(raw, CultureInfo.InvariantCulture),
-                                  CultureInfo.InvariantCulture,
-                                  DateTimeStyles.AssumeLocal,
-                                  out dt))
-                              {
-                                   return dt.ToString("s", CultureInfo.InvariantCulture);
-                              }
-
-                              return null;
-                         }
-
-                    case ParameterDataType.Boolean:
-                         {
-                              string s = Convert.ToString(raw, CultureInfo.InvariantCulture);
-                              if (string.Equals(s, "1") || string.Equals(s, "true", StringComparison.OrdinalIgnoreCase))
-                                   return "True";
-                              if (string.Equals(s, "0") || string.Equals(s, "false", StringComparison.OrdinalIgnoreCase))
-                                   return "False";
-                              return null;
-                         }
-
-                    default:
-                         return Convert.ToString(raw, CultureInfo.InvariantCulture);
-               }
-          }
-
-          #endregion
-
-          #region ===== Email ========================================================================
-
-          private void SendPdfByEmail(byte[] pdfBytes, string fileName, string toEmail, string subject, string body)
-          {
-               if (pdfBytes == null || pdfBytes.Length == 0)
-                    throw new InvalidOperationException("Cannot send empty PDF attachment.");
-
-               string smtpHost = GetAppSetting("SendGridHost", "smtp.sendgrid.net");
-               int smtpPort = SafeToInt(GetAppSetting("SendGridPort", "587"), 587);
-               bool enableSsl = IsYes(GetAppSetting("SendGridEnableSsl", "true"));
-
-               string sendGridApiKey = GetAppSetting("SendGridApiKey", "");
-               string fromEmail = GetAppSetting("SendGridFromEmail", "");
-               string fromName = GetAppSetting("SendGridFromName", fromEmail);
-
-               if (string.IsNullOrWhiteSpace(fromEmail))
-                    throw new InvalidOperationException("SendGridFromEmail is missing.");
-
-               if (string.IsNullOrWhiteSpace(sendGridApiKey))
-                    throw new InvalidOperationException("SendGridApiKey is missing.");
-
-               using (MailMessage msg = new MailMessage())
-               {
-                    msg.From = new MailAddress(fromEmail, fromName);
-                    msg.To.Add(toEmail);
-                    msg.Subject = subject ?? "Room Block Confirmation";
-                    msg.Body = body ?? "";
-                    msg.IsBodyHtml = false;
-
-                    MemoryStream ms = new MemoryStream(pdfBytes);
-                    Attachment att = new Attachment(ms, fileName, "application/pdf");
-                    msg.Attachments.Add(att);
-
-                    using (SmtpClient client = new SmtpClient(smtpHost, smtpPort))
-                    {
-                         client.EnableSsl = enableSsl;
-
-                         // SendGrid SMTP with API key:
-                         // username = "apikey"
-                         // password = actual API key
-                         client.Credentials = new NetworkCredential("apikey", sendGridApiKey);
-
-                         client.Send(msg);
-                    }
-               }
-          }
-
-          #endregion
-
-          #region ===== Output =======================================================================
-
-          private void StreamPdfInline(byte[] pdfBytes, string fileName)
-          {
-               Response.Clear();
-               Response.ClearContent();
-               Response.ClearHeaders();
-               Response.TrySkipIisCustomErrors = true;
-               Response.Buffer = true;
-               Response.BufferOutput = true;
-
-               Response.ContentType = "application/pdf";
-               Response.AddHeader("X-Content-Type-Options", "nosniff");
-               Response.AddHeader("Content-Disposition", "inline; filename=\"" + fileName.Replace("\"", "") + "\"");
-               Response.BinaryWrite(pdfBytes);
-               Response.Flush();
-
-               HttpContext.Current.ApplicationInstance.CompleteRequest();
-          }
-
-          private void WriteAndEnd(string text)
-          {
-               Response.Clear();
-               Response.ClearContent();
-               Response.ClearHeaders();
-               Response.TrySkipIisCustomErrors = true;
-               Response.ContentType = "text/plain";
-               Response.Write(text ?? "");
-               Response.Flush();
-               HttpContext.Current.ApplicationInstance.CompleteRequest();
-          }
-
-          #endregion
-
-          #region ===== Token / Query Handling =======================================================
-
-          private string ResolveReportToken(string token, string cs)
-          {
-               if (string.IsNullOrWhiteSpace(token)) return null;
-
-               try
-               {
-                    using (SqlConnection con = new SqlConnection(cs))
-                    using (SqlCommand cmd = new SqlCommand("ICM.dbo.usp_ICM_ReportRequest_Resolve", con))
-                    {
-                         cmd.CommandType = CommandType.StoredProcedure;
-                         cmd.Parameters.Add("@Token", SqlDbType.NVarChar, 50).Value = token.Trim();
-
-                         con.Open();
-                         object o = cmd.ExecuteScalar();
-
-                         if (o == null || o == DBNull.Value)
-                              return null;
-
-                         string inner = Convert.ToString(o);
-                         inner = (inner ?? "").Trim();
-
-                         if (inner.StartsWith("?"))
-                              inner = inner.Substring(1);
-
-                         int qIndex = inner.IndexOf('?');
-                         if (qIndex >= 0 && qIndex < inner.Length - 1)
-                              inner = inner.Substring(qIndex + 1);
-
-                         return inner;
-                    }
-               }
-               catch (Exception ex)
-               {
-                    TraceLog("ResolveReportToken error | t=" + token, ex, "TOKEN_ERROR");
-                    return null;
-               }
-          }
-
-          private void InitSecureQueryFromToken()
-          {
-               if (_secureQsInitialized) return;
-               _secureQsInitialized = true;
-
-               string token = (Request.QueryString["t"] ?? Convert.ToString(RouteData.Values["t"]) ?? "").Trim();
-               if (string.IsNullOrWhiteSpace(token))
-                    return;
-
-               try
-               {
-                    string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
-                    string inner = ResolveReportToken(token, cs);
-
-                    if (string.IsNullOrWhiteSpace(inner))
-                    {
-                         TraceLog("InitSecureQueryFromToken: token not found or expired.", null, "SECURE");
-                         return;
-                    }
-
-                    _secureQs = HttpUtility.ParseQueryString(inner);
-               }
-               catch (Exception ex)
-               {
-                    TraceLog("InitSecureQueryFromToken failed for token=" + token, ex, "SECURE");
-               }
-          }
-
-          private string Q(string key)
-          {
-               InitSecureQueryFromToken();
-
-               if (_secureQs != null && !string.IsNullOrWhiteSpace(key))
-               {
-                    string v = _secureQs[key];
-                    if (v != null) return v;
-               }
-
-               return Request.QueryString[key];
-          }
-
-          #endregion
-
-          #region ===== Helpers ======================================================================
-
-          private static bool ValidateSessionId(string sessionId, string cs)
-          {
-               if (string.IsNullOrWhiteSpace(sessionId)) return false;
-
-               using (SqlConnection con = new SqlConnection(cs))
-               using (SqlCommand cmd = new SqlCommand("ICM.dbo.sp_ICM_Validate_SessionID", con))
-               {
-                    cmd.CommandType = CommandType.StoredProcedure;
-                    cmd.Parameters.Add("@SessionID", SqlDbType.NVarChar, 128).Value = sessionId.Trim();
-
-                    con.Open();
-                    object result = cmd.ExecuteScalar();
-
-                    if (result == null || result == DBNull.Value)
-                         return false;
-
-                    if (result is bool)
-                         return (bool)result;
-
-                    int i;
-                    if (int.TryParse(Convert.ToString(result, CultureInfo.InvariantCulture), out i))
-                         return i == 1;
-
-                    return false;
-               }
-          }
-
-          private static bool HasAnyRows(DataSet ds)
-          {
-               if (ds == null || ds.Tables.Count == 0) return false;
-
-               foreach (DataTable t in ds.Tables)
-               {
-                    if (t != null && t.Rows.Count > 0)
-                         return true;
-               }
-
-               return false;
-          }
-
-          private static string NormalizeRdlcPath(string raw)
-          {
-               string p = (raw ?? "").Replace('\\', '/').Trim();
-
-               if (!p.StartsWith("~"))
-                    p = "~/" + p.TrimStart('/');
-
-               if (string.IsNullOrWhiteSpace(Path.GetExtension(p)))
-                    p = Path.ChangeExtension(p, ".rdlc");
-
-               return p;
-          }
-
-          private static string FirstNonEmpty(params string[] values)
-          {
-               if (values == null) return "";
-
-               foreach (string v in values)
-               {
-                    if (!string.IsNullOrWhiteSpace(v))
-                         return v;
-               }
-
-               return "";
-          }
-
-          private static bool IsYes(string value)
-          {
-               return
-                   string.Equals((value ?? "").Trim(), "Y", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals((value ?? "").Trim(), "YES", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals((value ?? "").Trim(), "TRUE", StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals((value ?? "").Trim(), "1", StringComparison.OrdinalIgnoreCase);
-          }
-
-          private static int SafeToInt(string s, int defaultValue)
-          {
-               int x;
-               return int.TryParse((s ?? "").Trim(), out x) ? x : defaultValue;
-          }
-
-          private static string GetAppSetting(string key, string defaultValue)
-          {
-               string v = ConfigurationManager.AppSettings[key];
-               return string.IsNullOrWhiteSpace(v) ? defaultValue : v.Trim();
-          }
-
-          private static Exception GetRootException(Exception ex)
-          {
-               Exception root = ex;
-               while (root != null && root.InnerException != null)
-                    root = root.InnerException;
-               return root ?? ex;
-          }
-
-          private static void TraceLog(string message, Exception ex = null, string stage = null)
-          {
-               try
-               {
-                    HttpContext ctx = HttpContext.Current;
-                    string baseDir = (ctx != null)
-                        ? ctx.Server.MapPath("~/App_Data/logs")
-                        : Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "App_Data", "logs");
-
-                    Directory.CreateDirectory(baseDir);
-                    string path = Path.Combine(baseDir, "roomblockconfirmation_trace.txt");
-
-                    using (StreamWriter sw = new StreamWriter(path, true))
-                    {
-                         string stamp = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'", CultureInfo.InvariantCulture);
-                         sw.WriteLine("[" + stamp + "] " + (stage ?? "INFO") + " :: " + message);
-
-                         if (ex != null)
-                         {
-                              sw.WriteLine(ex.GetType().FullName);
-                              sw.WriteLine(ex.Message);
-                              sw.WriteLine(ex.StackTrace);
-                         }
-                    }
-               }
-               catch
-               {
-               }
-          }
-
-          private DataTable GetTableOrEmpty(DataSet ds, int index)
-          {
-               if (ds != null && ds.Tables.Count > index && ds.Tables[index] != null)
-                    return ds.Tables[index];
-
-               return new DataTable();
-          }
-
-
-
-          #endregion
-     }
 }
+
+
+
+cshtml page
+
+
+
+@model RoomBlockConfirmationOptionsVM
+@{
+     Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+     <title>Room Block Confirmation</title>
+
+     <style>
+          * {
+               box-sizing: border-box;
+          }
+
+          :root {
+               --primary: #2563eb;
+               --primary-dark: #1d4ed8;
+               --secondary: #0f172a;
+               --muted: #6b7280;
+               --border: #dbe4f0;
+               --card: rgba(255, 255, 255, 0.94);
+               --bg1: #eef4ff;
+               --bg2: #dbeafe;
+               --success-bg: #eff6ff;
+               --success-border: #bfdbfe;
+               --shadow: 0 20px 60px rgba(15, 23, 42, 0.16);
+          }
+
+          body {
+               margin: 0;
+               min-height: 100vh;
+               font-family: "Segoe UI", Arial, sans-serif;
+               background: radial-gradient(circle at top left, #ffffff 0%, transparent 32%), radial-gradient(circle at bottom right, #c7d2fe 0%, transparent 28%), linear-gradient(135deg, var(--bg1), var(--bg2));
+               display: flex;
+               align-items: center;
+               justify-content: center;
+               padding: 16px 14px;
+               color: var(--secondary);
+          }
+
+          .page-wrap {
+               width: 100%;
+               max-width: 900px;
+          }
+
+          .card {
+               position: relative;
+               overflow: hidden;
+               background: var(--card);
+               border: 1px solid rgba(255,255,255,0.6);
+               border-radius: 24px;
+               box-shadow: var(--shadow);
+               backdrop-filter: blur(10px);
+          }
+
+               .card::before {
+                    content: "";
+                    position: absolute;
+                    top: -80px;
+                    right: -80px;
+                    width: 220px;
+                    height: 220px;
+                    background: linear-gradient(135deg, rgba(37,99,235,0.18), rgba(59,130,246,0.04));
+                    border-radius: 50%;
+               }
+
+               .card::after {
+                    content: "";
+                    position: absolute;
+                    bottom: -70px;
+                    left: -70px;
+                    width: 180px;
+                    height: 180px;
+                    background: linear-gradient(135deg, rgba(29,78,216,0.12), rgba(255,255,255,0.02));
+                    border-radius: 50%;
+               }
+
+          .card-body {
+               position: relative;
+               z-index: 2;
+               padding: 24px 28px 22px;
+          }
+
+          .close-btn {
+               position: absolute;
+               top: 16px;
+               right: 16px;
+               width: 40px;
+               height: 40px;
+               border: none;
+               border-radius: 50%;
+               background: #f3f4f6;
+               color: #374151;
+               font-size: 24px;
+               line-height: 1;
+               cursor: pointer;
+               transition: all 0.2s ease;
+               z-index: 5;
+          }
+
+               .close-btn:hover {
+                    background: #e5e7eb;
+                    transform: scale(1.05);
+               }
+
+          .header {
+               margin-bottom: 16px;
+               padding-right: 48px;
+          }
+
+          .badge {
+               display: inline-flex;
+               align-items: center;
+               gap: 8px;
+               background: rgba(37, 99, 235, 0.10);
+               color: var(--primary-dark);
+               border: 1px solid rgba(37, 99, 235, 0.18);
+               font-size: 11px;
+               font-weight: 700;
+               letter-spacing: 0.4px;
+               text-transform: uppercase;
+               border-radius: 999px;
+               padding: 6px 12px;
+               margin-bottom: 10px;
+          }
+
+          .title {
+               margin: 0;
+               font-size: 24px;
+               font-weight: 700;
+               color: #0f172a;
+          }
+
+          .subtitle {
+               margin: 8px 0 0;
+               font-size: 14px;
+               line-height: 1.6;
+               color: var(--muted);
+               max-width: 700px;
+          }
+
+          .grid {
+               display: grid;
+               grid-template-columns: 1fr;
+               gap: 14px;
+          }
+
+          .section {
+               background: rgba(255,255,255,0.78);
+               border: 1px solid #e7edf7;
+               border-radius: 18px;
+               padding: 16px 18px;
+          }
+
+          .section-title {
+               margin: 0 0 8px;
+               font-size: 17px;
+               font-weight: 700;
+               color: #111827;
+          }
+
+          .section-desc {
+               margin: 0 0 12px;
+               font-size: 13px;
+               color: var(--muted);
+               line-height: 1.5;
+          }
+
+          .action-row {
+               display: flex;
+               flex-wrap: wrap;
+               gap: 12px;
+               align-items: center;
+          }
+
+          .action-note {
+               font-size: 14px;
+               font-weight: 600;
+               color: #1f2937;
+          }
+
+          .btn {
+               appearance: none;
+               border: none;
+               cursor: pointer;
+               border-radius: 12px;
+               min-width: 122px;
+               height: 42px;
+               padding: 0 18px;
+               font-size: 13px;
+               font-weight: 700;
+               transition: all 0.22s ease;
+               display: inline-flex;
+               align-items: center;
+               justify-content: center;
+               gap: 8px;
+          }
+
+          .btn-primary {
+               color: #fff;
+               background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+               box-shadow: 0 10px 22px rgba(37, 99, 235, 0.24);
+          }
+
+               .btn-primary:hover {
+                    transform: translateY(-1px);
+                    box-shadow: 0 14px 26px rgba(37, 99, 235, 0.30);
+               }
+
+          .btn-light {
+               color: #111827;
+               background: #ffffff;
+               border: 1px solid #d1d5db;
+               box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+          }
+
+               .btn-light:hover {
+                    transform: translateY(-1px);
+                    background: #f9fafb;
+               }
+
+          .field-label {
+               display: block;
+               margin-bottom: 10px;
+               font-size: 15px;
+               font-weight: 700;
+               color: #111827;
+          }
+
+          .textarea-wrap {
+               border-radius: 16px;
+               border: 1px solid var(--border);
+               background: #f8fbff;
+               padding: 12px;
+               transition: border-color 0.2s ease, box-shadow 0.2s ease;
+          }
+
+               .textarea-wrap:focus-within {
+                    border-color: #93c5fd;
+                    box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.08);
+                    background: #ffffff;
+               }
+
+          textarea {
+               width: 100%;
+               min-height: 160px;
+               resize: vertical;
+               border: none;
+               outline: none;
+               background: transparent;
+               font-family: "Segoe UI", Arial, sans-serif;
+               font-size: 15px;
+               line-height: 1.7;
+               color: #1f2937;
+          }
+
+          .footer-row {
+               display: flex;
+               flex-wrap: wrap;
+               gap: 12px;
+               align-items: center;
+               margin-top: 4px;
+          }
+
+          .info-box {
+               display: flex;
+               gap: 12px;
+               align-items: flex-start;
+               margin-top: 14px;
+               padding: 14px 16px;
+               background: var(--success-bg);
+               border: 1px solid var(--success-border);
+               border-radius: 16px;
+               color: #1e40af;
+          }
+
+          .info-icon {
+               flex: 0 0 auto;
+               width: 26px;
+               height: 26px;
+               border-radius: 50%;
+               background: #dbeafe;
+               display: flex;
+               align-items: center;
+               justify-content: center;
+               font-weight: 700;
+          }
+
+          .info-text {
+               font-size: 13px;
+               line-height: 1.55;
+          }
+
+          .loader-overlay {
+               position: fixed;
+               inset: 0;
+               background: rgba(15, 23, 42, 0.35);
+               display: none;
+               align-items: center;
+               justify-content: center;
+               z-index: 9999;
+               backdrop-filter: blur(3px);
+          }
+
+          .loader-box {
+               background: #ffffff;
+               border-radius: 18px;
+               padding: 22px 26px;
+               min-width: 240px;
+               text-align: center;
+               box-shadow: 0 20px 45px rgba(0,0,0,0.18);
+          }
+
+          .spinner {
+               width: 42px;
+               height: 42px;
+               margin: 0 auto 12px;
+               border: 4px solid #dbeafe;
+               border-top: 4px solid var(--primary);
+               border-radius: 50%;
+               animation: spin 0.85s linear infinite;
+          }
+
+          .loader-text {
+               font-size: 14px;
+               font-weight: 600;
+               color: #334155;
+          }
+
+          @@keyframes spin {
+               to {
+                    transform: rotate(360deg);
+               }
+          }
+
+          @@media (max-width: 768px) {
+               .card-body {
+                    padding: 20px 16px 18px;
+               }
+
+               .title {
+                    font-size: 22px;
+               }
+
+               .btn {
+                    width: 100%;
+               }
+
+               .action-row,
+               .footer-row {
+                    align-items: stretch;
+               }
+
+               .action-note {
+                    width: 100%;
+               }
+
+               textarea {
+                    min-height: 140px;
+               }
+          }
+
+          @@media print {
+               body {
+                    background: #fff;
+                    padding: 0;
+               }
+
+               .card {
+                    box-shadow: none;
+                    border: none;
+                    background: #fff;
+               }
+
+               .close-btn,
+               .info-box {
+                    display: none !important;
+               }
+          }
+
+          .btn:disabled {
+               opacity: 0.7;
+               cursor: not-allowed;
+          }
+     </style>
+</head>
+<body>
+
+     <input type="hidden" id="hdnPrintToken" value="@Model.PrintToken" />
+
+     <div class="page-wrap">
+          <div class="card">
+               <button type="button" class="close-btn" onclick="closePage()">×</button>
+
+               <div class="card-body">
+                    <div class="header">
+                         <div class="badge">Room Block Confirmation</div>
+                         <h1 class="title">Confirmation Options</h1>
+                         <p class="subtitle">
+                              Review the message below and choose whether you want to email the room block confirmation
+                              or open the printable version.
+                         </p>
+                    </div>
+
+                    <div class="grid">
+                         <div class="section">
+                              <h2 class="section-title">Email Confirmation</h2>
+                              <p class="section-desc">
+                                   Send the confirmation along with the custom message entered below.
+                              </p>
+
+                              <div class="action-row">
+                                   <button type="button"  id="btnEmail" class="btn btn-primary" onclick="sendEmail()">EMAIL</button>
+                                   <span class="action-note">Send confirmation via email</span>
+                              </div>
+                         </div>
+
+                         <div class="section">
+                              <label for="txtMessage" class="field-label">Message to include in emailed confirmation</label>
+
+                              <div class="textarea-wrap">
+                                   <textarea id="txtMessage">@Model.DefaultMessage</textarea>
+                              </div>
+                         </div>
+
+                         <div class="section">
+                              <h2 class="section-title">Print Confirmation</h2>
+                              <p class="section-desc">
+                                   Open the printable confirmation in a new tab using the generated secure token.
+                              </p>
+
+                              <div class="footer-row">
+                                   <button type="button" class="btn btn-light" onclick="printPage()">PRINT</button>
+                                   <span class="action-note">Open printable confirmation</span>
+                              </div>
+                         </div>
+                    </div>
+
+                    <div class="info-box">
+                         <div class="info-icon">i</div>
+                         <div class="info-text">
+                              Please review the message carefully before sending the confirmation. The print option will open the confirmation in a separate tab.
+                         </div>
+                    </div>
+               </div>
+          </div>
+     </div>
+
+     <iframe id="hiddenReportFrame" style="display:none;"></iframe>
+
+     <div class="loader-overlay" id="loaderOverlay">
+          <div class="loader-box">
+               <div class="spinner"></div>
+               <div class="loader-text">Please wait...</div>
+          </div>
+     </div>
+
+     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+     <script>
+          function showLoader() {
+              document.getElementById("loaderOverlay").style.display = "flex";
+          }
+
+          function hideLoader() {
+              document.getElementById("loaderOverlay").style.display = "none";
+          }
+
+          function printPage() {
+              var token = document.getElementById("hdnPrintToken").value || "";
+              if (!token) {
+                  alert("Print token not found.");
+                  return;
+              }
+
+              var finalUrl = "http://localhost:50825/Report16/RoomBlockConfirmation.aspx?t=" + encodeURIComponent(token);
+              window.open(finalUrl, "_blank");
+          }
+
+              function sendEmail() {
+              var emailTemplate = document.getElementById("txtMessage").value || "";
+              var btn = document.getElementById("btnEmail");
+
+              showLoader();
+
+              btn.disabled = true;
+              btn.innerText = "SENDING...";
+
+              $.ajax({
+                  url: "/Admin/RoomBlock/CreateRoomBlockEmailToken",
+                  type: "POST",
+                  data: {
+                      message: emailTemplate
+                  },
+                  dataType: "json",
+                  success: function (res) {
+                      hideLoader();
+
+                      var token = res && res.token;
+                      if (!token) {
+                          btn.disabled = false;
+                          btn.innerText = "EMAIL";
+                          alert("Unable to generate email token.");
+                          return;
+                      }
+
+                      var finalUrl = "http://localhost:50825/Report16/RoomBlockConfirmation.aspx?t=" + encodeURIComponent(token);
+
+                      var iframe = document.getElementById("hiddenReportFrame");
+                      if (!iframe) {
+                          iframe = document.createElement("iframe");
+                          iframe.id = "hiddenReportFrame";
+                          iframe.style.display = "none";
+                          document.body.appendChild(iframe);
+                      }
+
+                      iframe.src = finalUrl;
+
+                      btn.innerText = "EMAIL SENT";
+
+                      setTimeout(function () {
+                          btn.innerText = "EMAIL";
+                          btn.disabled = false;
+                      }, 2000);
+                  },
+                  error: function (xhr, status, err) {
+                      hideLoader();
+                      console.error("CreateRoomBlockEmailToken error:", status, err, xhr.responseText);
+
+                      btn.disabled = false;
+                      btn.innerText = "EMAIL";
+
+                      alert("Sorry, unable to send email confirmation at this time.");
+                  }
+              });
+          }
+
+
+          function closePage() {
+              if (window.history.length > 1) {
+                  window.history.back();
+              } else {
+                  window.close();
+              }
+          }
+     </script>
+</body>
+</html>
