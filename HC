@@ -35,6 +35,13 @@ namespace ReportRDLC.Report16
           private string _secureToken;
           private bool _secureQsInitialized = false;
 
+
+          private sealed class ReportRequestRow
+          {
+               public string InnerQueryString { get; set; }
+               public string EmailTemplate { get; set; }
+          }
+
           #endregion
 
           #region ===== Page Load ===================================================================
@@ -65,112 +72,113 @@ namespace ReportRDLC.Report16
 
           private void ProcessRequest()
           {
-               string cs = ConfigurationManager.ConnectionStrings["ICMReportConnectionString"].ConnectionString;
+               string token = Q("t");
 
-               try
+               ReportRequestRow tokenRow = GetReportRequestByToken(token);
+               NameValueCollection innerQs = ParseInnerQuery(tokenRow?.InnerQueryString);
+
+               string emnno = QV("EMNNO", innerQs);
+               string htnno = QV("HTNNO", innerQs);
+               string hbnno = QV("HBNNO", innerQs);
+               string hbcno = QV("HBCNO", innerQs);   // if your actual key is HBCNNO then change here
+               string runTimeStr = QV("RunTime", innerQs);
+
+               bool reportEmail = IsYes(QV("Email", innerQs)) || IsYes(QV("ReportEmail", innerQs));
+
+               
+               string toEmail = QV("ToEmail", innerQs);
+               if (string.IsNullOrWhiteSpace(toEmail))
+                    toEmail = QV("Email", innerQs);
+
+               DateTime runTime;
+               bool hasRunTime = DateTime.TryParse(runTimeStr, out runTime);
+
+               DataSet ds = GetDataFromSp(
+                   emnno: emnno,
+                   htnno: htnno,
+                   runTime: hasRunTime ? (DateTime?)runTime : null
+               );
+
+               if (ds == null || ds.Tables.Count == 0 || ds.Tables[0].Rows.Count == 0)
                {
-                    string type = (Q("Type") ?? "").Trim();
-                    string sessionId = FirstNonEmpty(Q("SUSessionID"), Q("sessionid")).Trim();
-                    string blockNo = (Q("BlockNo") ?? "").Trim();
-                    string emnno = (Q("EMNNO") ?? "").Trim();
-                    string emailFlag = (Q("Email") ?? "").Trim();
-
-                    TraceLog("ENTER ProcessRequest | Type=" + type + " | EMNNO=" + emnno + " | BlockNo=" + blockNo + " | Email=" + emailFlag, null, "ENTER");
-
-                    if (!"Block".Equals(type, StringComparison.OrdinalIgnoreCase))
-                    {
-                         WriteAndEnd("Invalid Type. Expected Type=Block.");
-                         return;
-                    }
-
-                    if (string.IsNullOrWhiteSpace(sessionId))
-                    {
-                         WriteAndEnd("Missing session.");
-                         return;
-                    }
-
-                    if (!ValidateSessionId(sessionId, cs))
-                    {
-                         WriteAndEnd("Invalid session!");
-                         return;
-                    }
-
-                    int emnnoInt;
-                    if (!int.TryParse(emnno, out emnnoInt) || emnnoInt <= 0)
-                    {
-                         WriteAndEnd("Invalid EMNNO.");
-                         return;
-                    }
-
-                    int hbnno;
-                    if (!int.TryParse(blockNo, out hbnno) || hbnno <= 0)
-                    {
-                         WriteAndEnd("Invalid BlockNo/HBNNO.");
-                         return;
-                    }
-
-                    DataSet ds = GetDataFromSp(cs, emnnoInt, hbnno);
-
-                    if (ds == null || ds.Tables.Count == 0)
-                    {
-                         WriteAndEnd("No data returned from stored procedure.");
-                         return;
-                    }
-
-                    if (!HasAnyRows(ds))
-                    {
-                         WriteAndEnd("No data found for the supplied EMNNO and BlockNo.");
-                         return;
-                    }
-
-                    string pdfFileName = "RoomBlockConfirmation_" + emnnoInt + "_" + hbnno + ".pdf";
-                    byte[] pdfBytes = BuildPdfBytes(ds, emnnoInt, hbnno);
-
-                    if (pdfBytes == null || pdfBytes.Length == 0)
-                    {
-                         WriteAndEnd("Failed to generate PDF.");
-                         return;
-                    }
-
-                    // Email mode: fetch HBCEMAIL from HOTELROOMBLOCKS and send ONLY email
-                    if (IsYes(emailFlag))
-                    {
-                         string toEmail = GetHotelRoomBlockEmail(cs, hbnno);
-
-                         if (string.IsNullOrWhiteSpace(toEmail))
-                         {
-                              WriteAndEnd("No email found in HOTELROOMBLOCKS (HBCEMAIL) for this BlockNo.");
-                              return;
-                         }
-
-                         SendPdfByEmail(
-                             pdfBytes,
-                             pdfFileName,
-                             toEmail,
-                             "Room Block Confirmation - EMNNO " + emnnoInt + " | BlockNo " + hbnno,
-                             "Please find attached the Room Block Confirmation PDF."
-                         );
-
-                         TraceLog("Email sent successfully to " + toEmail, null, "EMAIL");
-
-                         // IMPORTANT: do not render PDF in email mode
-                         WriteAndEnd("Email sent successfully.");
-                         return;
-                    }
-
-                    // Normal mode: render PDF inline
-                    StreamPdfInline(pdfBytes, pdfFileName);
-
-                    TraceLog("EXIT ProcessRequest", null, "EXIT");
+                    Response.Write("No data found.");
+                    return;
                }
-               catch (Exception ex)
+
+               DataRow dr = ds.Tables[0].Rows[0];
+
+               string eventName = FirstNonBlank(
+                   Convert.ToString(dr.Table.Columns.Contains("EMCNM") ? dr["EMCNM"] : null),
+                   Convert.ToString(dr.Table.Columns.Contains("EventName") ? dr["EventName"] : null)
+               );
+
+               hbnno = FirstNonBlank(
+                   hbnno,
+                   dr.Table.Columns.Contains("HBNNO") ? Convert.ToString(dr["HBNNO"]) : ""
+               );
+
+               hbcno = FirstNonBlank(
+                   hbcno,
+                   dr.Table.Columns.Contains("HBCNO") ? Convert.ToString(dr["HBCNO"]) : "",
+                   dr.Table.Columns.Contains("HBCNNO") ? Convert.ToString(dr["HBCNNO"]) : ""
+               );
+
+               htnno = FirstNonBlank(
+                   htnno,
+                   dr.Table.Columns.Contains("HTNNO") ? Convert.ToString(dr["HTNNO"]) : ""
+               );
+
+               // Your existing RDLC render method
+               byte[] pdfBytes = RenderPdf(ds); // replace with your actual render method
+
+               if (reportEmail)
                {
-                    Exception root = GetRootException(ex);
-                    TraceLog("ProcessRequest ERROR", root, "ERROR");
-                    WriteAndEnd(root.Message);
+                    string bodyFromToken = tokenRow == null ? "" : tokenRow.EmailTemplate;
+                    string bodyFromHotel = GetHotelBlockEmailMessage(hbnno, htnno);
+
+                    string finalBodyHtml =
+                        !string.IsNullOrWhiteSpace(bodyFromToken)
+                            ? NormalizeHtmlBody(bodyFromToken)
+                            : !string.IsNullOrWhiteSpace(bodyFromHotel)
+                                ? NormalizeHtmlBody(bodyFromHotel)
+                                : "";
+
+                    string subject = "RoomBlock Receipt:" + eventName + " - " + hbnno + " " + hbcno;
+                    string pdfFileName = hbnno + "_" + hbcno + ".pdf";
+
+                    SendMailWithPdf(toEmail, subject, finalBodyHtml, pdfBytes, pdfFileName);
+
+                    Response.Clear();
+                    Response.ContentType = "text/plain";
+                    Response.Write("Email sent successfully.");
+                    Response.End();
+                    return;
                }
+
+               // normal PDF open flow
+               Response.Clear();
+               Response.ContentType = "application/pdf";
+               Response.AddHeader("content-disposition", "inline;filename=" + hbnno + "_" + hbcno + ".pdf");
+               Response.BinaryWrite(pdfBytes);
+               Response.End();
           }
 
+
+          private byte[] RenderPdf(DataSet ds)
+          {
+               LocalReport report = new LocalReport();
+               report.ReportPath = Server.MapPath(RDLC_VIRTUAL_PATH);
+
+               report.DataSources.Clear();
+               report.DataSources.Add(new ReportDataSource("DS_TTS", ds.Tables[0]));
+               // add your other datasets too
+
+               string mimeType, encoding, extension;
+               string[] streamIds;
+               Warning[] warnings;
+
+               return report.Render("PDF", null, out mimeType, out encoding, out extension, out streamIds, out warnings);
+          }
           #endregion
 
           #region ===== Data Fetch ===================================================================
@@ -766,6 +774,160 @@ namespace ReportRDLC.Report16
                     return ds.Tables[index];
 
                return new DataTable();
+          }
+
+
+          private ReportRequestRow GetReportRequestByToken(string token)
+          {
+               if (string.IsNullOrWhiteSpace(token))
+                    return null;
+
+               Guid g;
+               if (!Guid.TryParse(token, out g))
+                    return null;
+
+               using (SqlConnection con = new SqlConnection(ConfigurationManager.ConnectionStrings["NorthwindConnection"].ConnectionString))
+               using (SqlCommand cmd = new SqlCommand(@"
+        SELECT TOP 1
+            InnerQueryString,
+            EmailTemplate
+        FROM dbo.ReportRequest
+        WHERE Token = @Token;", con))
+               {
+                    cmd.Parameters.Add("@Token", SqlDbType.UniqueIdentifier).Value = g;
+                    con.Open();
+
+                    using (SqlDataReader dr = cmd.ExecuteReader())
+                    {
+                         if (dr.Read())
+                         {
+                              return new ReportRequestRow
+                              {
+                                   InnerQueryString = dr["InnerQueryString"] == DBNull.Value ? "" : Convert.ToString(dr["InnerQueryString"]),
+                                   EmailTemplate = dr["EmailTemplate"] == DBNull.Value ? "" : Convert.ToString(dr["EmailTemplate"])
+                              };
+                         }
+                    }
+               }
+
+               return null;
+          }
+
+          private NameValueCollection ParseInnerQuery(string innerQueryString)
+          {
+               if (string.IsNullOrWhiteSpace(innerQueryString))
+                    return new NameValueCollection();
+
+               innerQueryString = innerQueryString.Trim();
+               if (innerQueryString.StartsWith("?"))
+                    innerQueryString = innerQueryString.Substring(1);
+
+               return HttpUtility.ParseQueryString(innerQueryString);
+          }
+
+          private string QV(string key, NameValueCollection innerQs = null)
+          {
+               string v = Request.QueryString[key];
+               if (!string.IsNullOrWhiteSpace(v))
+                    return v;
+
+               if (innerQs != null)
+                    return innerQs[key] ?? "";
+
+               return "";
+          }
+
+          private string FirstNonBlank(params string[] values)
+          {
+               foreach (var v in values)
+               {
+                    if (!string.IsNullOrWhiteSpace(v))
+                         return v.Trim();
+               }
+               return "";
+          }
+
+          private string NormalizeHtmlBody(string htmlOrText)
+          {
+               if (string.IsNullOrWhiteSpace(htmlOrText))
+                    return "";
+
+               string value = htmlOrText.Trim();
+
+               // If it already looks like HTML, keep as-is
+               if (value.IndexOf("<") >= 0 && value.IndexOf(">") >= 0)
+                    return value;
+
+               // Plain text -> HTML safe with line breaks
+               return HttpUtility.HtmlEncode(value)
+                   .Replace("\r\n", "<br />")
+                   .Replace("\n", "<br />");
+          }
+
+          private string GetHotelBlockEmailMessage(string hbnno, string htnno)
+          {
+               using (SqlConnection con = new SqlConnection(ConfigurationManager.ConnectionStrings["NorthwindConnection"].ConnectionString))
+               using (SqlCommand cmd = new SqlCommand())
+               {
+                    cmd.Connection = con;
+
+                    if (!string.IsNullOrWhiteSpace(hbnno))
+                    {
+                         cmd.CommandText = @"
+                SELECT TOP 1 ISNULL(H.HTCBLKEMAILMESSAGE, '')
+                FROM dbo.HOTELROOMBLOCKS HB
+                INNER JOIN dbo.HOTEL H
+                    ON H.HTNNO = HB.HTNNO
+                WHERE HB.HBNNO = @HBNNO;";
+                         cmd.Parameters.Add("@HBNNO", SqlDbType.Int).Value = Convert.ToInt32(hbnno);
+                    }
+                    else
+                    {
+                         cmd.CommandText = @"
+                SELECT TOP 1 ISNULL(HTCBLKEMAILMESSAGE, '')
+                FROM dbo.HOTEL
+                WHERE HTNNO = @HTNNO;";
+                         cmd.Parameters.Add("@HTNNO", SqlDbType.Int).Value = Convert.ToInt32(htnno);
+                    }
+
+                    con.Open();
+                    object obj = cmd.ExecuteScalar();
+                    return obj == null || obj == DBNull.Value ? "" : Convert.ToString(obj);
+               }
+          }
+
+          private void SendMailWithPdf(string toEmail, string subject, string bodyHtml, byte[] pdfBytes, string pdfFileName)
+          {
+               string fromEmail = ConfigurationManager.AppSettings["SendGridFromEmail"];
+               string fromName = ConfigurationManager.AppSettings["SendGridFromName"];
+               string smtpHost = ConfigurationManager.AppSettings["SendGridHost"];
+               int smtpPort = Convert.ToInt32(ConfigurationManager.AppSettings["SendGridPort"]);
+               string smtpUser = "apikey";
+               string smtpPass = ConfigurationManager.AppSettings["SendGridApiKey"];
+               bool enableSsl = Convert.ToBoolean(ConfigurationManager.AppSettings["SendGridEnableSsl"]);
+
+               using (MailMessage mail = new MailMessage())
+               {
+                    mail.From = new MailAddress(fromEmail, fromName);
+                    mail.To.Add(toEmail);
+                    mail.Subject = subject;
+                    mail.Body = string.IsNullOrWhiteSpace(bodyHtml) ? "" : bodyHtml;
+                    mail.IsBodyHtml = true;
+
+                    if (pdfBytes != null && pdfBytes.Length > 0)
+                    {
+                         MemoryStream ms = new MemoryStream(pdfBytes);
+                         Attachment att = new Attachment(ms, pdfFileName, "application/pdf");
+                         mail.Attachments.Add(att);
+                    }
+
+                    using (SmtpClient smtp = new SmtpClient(smtpHost, smtpPort))
+                    {
+                         smtp.EnableSsl = enableSsl;
+                         smtp.Credentials = new NetworkCredential(smtpUser, smtpPass);
+                         smtp.Send(mail);
+                    }
+               }
           }
 
           #endregion
