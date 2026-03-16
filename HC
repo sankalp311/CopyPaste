@@ -1,175 +1,207 @@
-on controller inside method 
-var AreaText = await _reRepo.GetAreaText(blockNo);
+private void BuildFilterForm(string cs, string rptId)
+          {
+               TraceLog($"ENTER BuildFilterForm | RptId={rptId}", stage: "ENTER");
 
+               // ---- helpers (kept inside) ----
+               string H(string s) => System.Web.HttpUtility.HtmlEncode(s ?? "");
 
-Interface 
-	Task<string> GetAreaText(string areatext);
-	
-	
-	
-	Reportrepo
-	
-	      public async Task<string> GetAreaText(string areatext)
-      {
-			
+               string ToDatetimeLocal(DateTime dt) => dt.ToString("yyyy-MM-dd'T'HH:mm", CultureInfo.InvariantCulture);
 
-			if (string.IsNullOrWhiteSpace(areatext))
-return "";
+               // prefer SourceKey as posted name; else bare param name
+               string InputName(string paramName, string sourceKey) =>
+                   string.IsNullOrWhiteSpace(sourceKey) ? paramName.TrimStart('@') : sourceKey;
 
+               bool IsParam(string paramName, string wanted) =>
+                   paramName.Equals(wanted, StringComparison.OrdinalIgnoreCase) ||
+                   paramName.Equals("@" + wanted, StringComparison.OrdinalIgnoreCase);
 
+               // value priority: QueryString (by key or bare) -> Session -> DefaultValue
+               string GetPrefill(string paramName, string sourceKey, string defaultValue)
+               {
+                    string bare = paramName.TrimStart('@');
 
-			var request = new HttpRequestMessage(
-   HttpMethod.Post,
-   _AppSettings.ApiRootUrl + "Reports/CreateSecureReportLink"
-			);
+                    // QS first
+                    string qs = null;
+                    if (!string.IsNullOrWhiteSpace(sourceKey)) qs = Request.QueryString[sourceKey];
+                    if (string.IsNullOrWhiteSpace(qs)) qs = Request.QueryString[bare];
+                    if (!string.IsNullOrWhiteSpace(qs)) return qs.Trim();
 
-			request.Content = new StringContent(
-   JsonConvert.SerializeObject(requestModel),
-   Encoding.UTF8,
-   "application/json"
-			);
+                    // Session
+                    object sess = null;
+                    if (!string.IsNullOrWhiteSpace(sourceKey)) sess = Session[sourceKey];
+                    if (sess == null) sess = Session[bare];
+                    if (sess != null) return Convert.ToString(sess)?.Trim();
 
-			var client = _ClientFactory.CreateClient();
-			client.DefaultRequestHeaders.Add("X-API-KEY", _AppSettings.APITokenKey);
-			client.DefaultRequestHeaders.Add("User-Agent", "PostmanRuntime/7.42.0");
+                    // Default
+                    return defaultValue ?? "";
+               }
 
-			HttpResponseMessage response = await client.SendAsync(request);
+               IEnumerable<(string Value, string Text)> QueryPairs(string sqlstr, params SqlParameter[] args)
+               {
+                    using (var con = new SqlConnection(cs))
+                    using (var cmd = new SqlCommand(sqlstr, con))
+                    {
+                         if (args?.Length > 0) cmd.Parameters.AddRange(args);
+                         con.Open();
+                         using (var r = cmd.ExecuteReader())
+                         {
+                              while (r.Read())
+                                   yield return (Convert.ToString(r.GetValue(0)), Convert.ToString(r.GetValue(1)));
+                         }
+                    }
+               }
 
-			if (response.StatusCode == System.Net.HttpStatusCode.OK)
-			{
-var jsonString = await response.Content.ReadAsStringAsync();
+               // hide these even if required (still sent server-side)
+               var hiddenRequired = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+               { "@SessionID", "@EMCNO" };
 
-try
-{
-	token = jsonString;// JsonConvert.DeserializeObject<string>(jsonString) ?? "";
-}
-catch
-{
-	token = "";
-}
-			}
+               // we need EMNNO for filtering Category/Hotel lists
+               string emnnoCtx = (Request.QueryString["EMNNO"] ?? Convert.ToString(Session["LoginEmnno"] ?? "")).Trim();
+               if (string.IsNullOrEmpty(emnnoCtx)) emnnoCtx = "0";
 
-			return token;
-		}
-		
-		
-		
-		
-		
-		API flow need to write for above but giving you a example like how you can write
-		
-		ReportController API
-			[HttpPost]
-	public IActionResult CreateSecureReportLink([FromBody] SecureReportLinkRequest request)
-	{
-		if (request == null || string.IsNullOrWhiteSpace(request.InnerQueryString))
-			return BadRequest("innerQueryString is required.");
+               // ---- load parameter rows ----
+               var rows = new List<(string ParamName, string DbType, string Source, string SourceKey, string DefaultValue, bool IsRequired, int Ordinal, string Label)>();
+               const string sql = @"
+        SELECT ParamName, DbType, Source, SourceKey, DefaultValue, IsRequired, Ordinal,Label
+        FROM ICM.dbo.REPORT_PARAMETERS
+        WHERE RMNNO=@id
+        ORDER BY Ordinal";
+               using (var con = new SqlConnection(cs))
+               using (var cmd = new SqlCommand(sql, con))
+               {
+                    cmd.Parameters.Add("@id", SqlDbType.VarChar, 50).Value = rptId;
+                    con.Open();
+                    using (var r = cmd.ExecuteReader())
+                    {
+                         while (r.Read())
+                         {
+                              rows.Add((
+                                  r.GetString(0),
+                                  r.GetString(1),
+                                  r.GetString(2),
+                                  r.IsDBNull(3) ? null : r.GetString(3),
+                                  r.IsDBNull(4) ? null : r.GetString(4),
+                                  !r.IsDBNull(5) && r.GetBoolean(5),
+                                  r.IsDBNull(6) ? 0 : r.GetInt32(6),
+                                  r.IsDBNull(7) ? null : r.GetString(7)
+                              ));
+                         }
+                    }
+               }
 
-		var token = _rRepo.CreateSecureReportLink(
-		    request.InnerQueryString,
-		    "RoomBlockConfirmation.aspx",
-		    "",
-		    "",
-		    request.EmailTemplate,
-		    request.UserId
-		);
+               // ---- build HTML ----
+               pnlFilters.Visible = true;
+               var sb = new System.Text.StringBuilder();
 
-		return Ok(token);
-	}
-	
-	
-	
-	
-	Interface
-	
-			string CreateSecureReportLink(
-    string innerQueryString,
-    string targetPage,
-    string createdByIp,
-    string createdByUserAgent,
-    string emailTemplate = null,
-    long? userId = null
-);
+               foreach (var p in rows.Where(x => x.IsRequired))
+               {
+                    if (hiddenRequired.Contains(p.ParamName)) continue;
 
+                    string htmlName = InputName(p.ParamName, p.SourceKey);
+                    //string label = p.ParamName.TrimStart('@');
+                    string label = !string.IsNullOrWhiteSpace(p.Label) ? p.Label
+                                        : !string.IsNullOrWhiteSpace(p.SourceKey)
+                                            ? p.SourceKey
+                                            : p.ParamName.TrimStart('@');
 
+                    string prefill = GetPrefill(p.ParamName, p.SourceKey, p.DefaultValue);
+                    string dbt = (p.DbType ?? "").ToLowerInvariant();
 
-repo 
+                    // Auto-default for From/To when nothing provided: today range
+                    if (IsParam(p.ParamName, "From") && string.IsNullOrWhiteSpace(prefill))
+                    {
+                         var start = DateTime.Now.Date; // 00:00 local today
+                         prefill = ToDatetimeLocal(start);
+                    }
+                    if (IsParam(p.ParamName, "RGDTADD_FROM") && string.IsNullOrWhiteSpace(prefill))
+                    {
+                         var start = DateTime.Now.Date; // 00:00 local today
+                         prefill = ToDatetimeLocal(start);
+                    }
+                    if (IsParam(p.ParamName, "To") && string.IsNullOrWhiteSpace(prefill))
+                    {
+                         var now = DateTime.Now;        // now (change to Date.AddDays(1).AddSeconds(-1) for EOD)
+                         prefill = ToDatetimeLocal(now);
+                    }
+                    if (IsParam(p.ParamName, "RGDTADD_TO") && string.IsNullOrWhiteSpace(prefill))
+                    {
+                         var start = DateTime.Now.Date; // 00:00 local today
+                         prefill = ToDatetimeLocal(start);
+                    }
 
-	public string CreateSecureReportLink(
-    string innerQueryString,
-    string targetPage,
-    string createdByIp,
-    string createdByUserAgent,
-    string emailTemplate = null,
-    long? userId = null
-)
-	{
-		string result = "";
-		ReportsDA _ReportsDa = new ReportsDA(_configuration);
-		DataSet ds = new DataSet();
+                    // Known dropdowns (Category / Hotel)
+                    if (IsParam(p.ParamName, "CMNNO"))
+                    {
+                         sb.Append("<div class='form-group'>");
+                         sb.AppendFormat("<label class='col-sm-3 control-label'>{0}:</label><div class='col-sm-6'>", H("Category"));
+                         sb.AppendFormat("<select class='form-control' name='{0}' id='{0}'>", H(htmlName));
+                         sb.Append("<option value='0'>-- Select All --</option>");
+                         foreach (var row in QueryPairs(
+                             "SELECT CMNNO, CMCDSC FROM ICM.dbo.CATEGORY WHERE EMNNO=@emnno ORDER BY CMCDSC",
+                             new SqlParameter("@emnno", emnnoCtx)))
+                         {
+                              bool sel = !string.IsNullOrEmpty(prefill) && prefill == row.Value;
+                              sb.AppendFormat("<option value='{0}' {2}>{1}</option>",
+                                  H(row.Value), H(row.Text), sel ? "selected" : "");
+                         }
+                         sb.Append("</select></div></div>");
+                         continue;
+                    }
+                    if (IsParam(p.ParamName, "HTNNO"))
+                    {
+                         sb.Append("<div class='form-group'>");
+                         sb.AppendFormat("<label class='col-sm-3 control-label'>{0}:</label><div class='col-sm-6'>", H("Hotel"));
+                         sb.AppendFormat("<select class='form-control' name='{0}' id='{0}'>", H(htmlName));
+                         sb.Append("<option value='0'>-- Select Hotel --</option>");
+                         foreach (var row in QueryPairs(
+                             "SELECT HTNNO, HTCDSC FROM ICM.dbo.Hotel WHERE EMNNO=@emnno ORDER BY HTCDSC",
+                             new SqlParameter("@emnno", emnnoCtx)))
+                         {
+                              bool sel = !string.IsNullOrEmpty(prefill) && prefill == row.Value;
+                              sb.AppendFormat("<option value='{0}' {2}>{1}</option>",
+                                  H(row.Value), H(row.Text), sel ? "selected" : "");
+                         }
+                         sb.Append("</select></div></div>");
+                         continue;
+                    }
 
-		ds = _ReportsDa.CreateSecureReportLink(
-		    innerQueryString,
-		    targetPage,
-		    120,
-		    createdByIp,
-		    createdByUserAgent,
-		    emailTemplate,
-		    userId
-		);
+                    // Generic widgets
+                    if (dbt.StartsWith("datetime"))
+                    {
+                         sb.Append("<div class='form-group'>");
+                         sb.AppendFormat("<label class='col-sm-3 control-label'>{0}:</label><div class='col-sm-6'>", H(label));
+                         sb.AppendFormat("<input type='datetime-local' class='form-control' name='{0}' id='{0}' value='{1}' />",
+                             H(htmlName), H(prefill));
+                         sb.Append("</div></div>");
+                    }
+                    else if (dbt.StartsWith("int"))
+                    {
+                         sb.Append("<div class='form-group'>");
+                         sb.AppendFormat("<label class='col-sm-3 control-label'>{0}:</label><div class='col-sm-6'>", H(label));
+                         sb.AppendFormat("<input type='number' class='form-control' name='{0}' id='{0}' value='{1}' />",
+                             H(htmlName), H(prefill));
+                         sb.Append("</div></div>");
+                    }
+                    else if (dbt.StartsWith("bit"))
+                    {
+                         bool isChecked = prefill == "1" || prefill.Equals("true", StringComparison.OrdinalIgnoreCase);
+                         sb.Append("<div class='form-group'>");
+                         sb.AppendFormat("<label class='col-sm-3 control-label'>{0}:</label><div class='col-sm-6'>", H(label));
+                         sb.AppendFormat("<input type='checkbox' name='{0}' id='{0}' {1} />",
+                             H(htmlName), isChecked ? "checked" : "");
+                         sb.Append("</div></div>");
+                    }
+                    else
+                    {
+                         sb.Append("<div class='form-group'>");
+                         sb.AppendFormat("<label class='col-sm-3 control-label'>{0}:</label><div class='col-sm-6'>", H(label));
+                         sb.AppendFormat("<input type='text' class='form-control' name='{0}' id='{0}' value='{1}' />",
+                             H(htmlName), H(prefill));
+                         sb.Append("</div></div>");
+                    }
+               }
 
-		if (ds?.Tables[0]?.Rows.Count > 0)
-		{
-			result = Convert.ToString(ds.Tables[0].Rows[0]["Token"]);
-		}
+               ltrParams.Text = sb.ToString();
 
-		return result;
-	}
-	
-	
-	DA 
-		public DataSet CreateSecureReportLink(
-    string innerQueryString,
-    string targetPage,
-    int expiresInMinutes,
-    string createdByIp,
-    string createdByUserAgent,
-    string emailTemplate = null,
-    long? userId = null
-)
-	{
-		try
-		{
-			SqlParameter[] param = new SqlParameter[7];
-
-			param[0] = new SqlParameter("@InnerQueryString", innerQueryString);
-			param[1] = new SqlParameter("@TargetPage", (object)targetPage ?? DBNull.Value);
-			param[2] = new SqlParameter("@CreatedByIp", (object)createdByIp ?? DBNull.Value);
-			param[3] = new SqlParameter("@CreatedByUserAgent", (object)createdByUserAgent ?? DBNull.Value);
-			param[4] = new SqlParameter("@ExpiresInMinutes", expiresInMinutes);
-			param[5] = new SqlParameter("@EmailTemplate", (object)emailTemplate ?? DBNull.Value);
-			param[6] = new SqlParameter("@UserId", (object)userId ?? DBNull.Value);
-
-			ds = SqlHelper.ExecuteDataSet(
-			    _configuration.NorthwindConnection,
-			    "usp_ICM_ReportRequest_Create",
-			    CommandType.StoredProcedure,
-			    param
-			);
-		}
-		catch (Exception ex)
-		{
-			ds = null;
-		}
-
-		return ds;
-	}
-	
-	
-	I need below sql value on my web controller as string 
-	
-	
-	
-	SELECT TOP 1 HTCBLKEMAILMESSAGE FROM HOTEL  WHERE HTNNO IN (SELECT  TOP 1 HTNNO FROM HOTELROOMBLOCKS WHERE HBNNO = BLOCKNO)
-	
-	
+               TraceLog("EXIT BuildFilterForm", stage: "EXIT");
+          }
