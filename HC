@@ -1,71 +1,576 @@
-<%@ Master Language="C#" AutoEventWireup="true" CodeBehind="Site.master.cs" Inherits="ReportRDLC.SiteMaster" %>
+<%@ Page Title="RDLC Reports" Language="C#" MasterPageFile="~/Site.Master" AutoEventWireup="true" CodeBehind="Default.aspx.cs" Inherits="ReportRDLC._Default" %>
 
-<!DOCTYPE html>
+<asp:Content ID="BodyContent" ContentPlaceHolderID="MainContent" runat="server">
 
-<html lang="en">
-<head runat="server">
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title><%: Page.Title %> - My ASP.NET Application</title>
+    <style>
+        :root {
+            --bg-main: #07111f;
+            --bg-soft: #0b1628;
+            --bg-card: rgba(10, 22, 40, 0.88);
+            --bg-card-2: rgba(12, 26, 46, 0.95);
 
-    <asp:PlaceHolder runat="server">
-        <%: Scripts.Render("~/bundles/modernizr") %>
-    </asp:PlaceHolder>
+            --neon-blue: #38bdf8;
+            --neon-cyan: #22d3ee;
+            --neon-violet: #8b5cf6;
+            --neon-green: #34d399;
 
-    <webopt:bundlereference runat="server" path="~/Content/css" />
-    <link href="~/favicon.ico" rel="shortcut icon" type="image/x-icon" />
+            --text-main: #e6eef8;
+            --text-soft: #9fb3c8;
+            --text-dim: #7f93aa;
 
-</head>
-<body>
-    <form runat="server">
-        <asp:ScriptManager runat="server">
-            <Scripts>
-                <%--To learn more about bundling scripts in ScriptManager see https://go.microsoft.com/fwlink/?LinkID=301884 --%>
-                <%--Framework Scripts--%>
-                <asp:ScriptReference Name="MsAjaxBundle" />
-                <asp:ScriptReference Name="jquery" />
-                <asp:ScriptReference Name="bootstrap" />
-                <asp:ScriptReference Name="WebForms.js" Assembly="System.Web" Path="~/Scripts/WebForms/WebForms.js" />
-                <asp:ScriptReference Name="WebUIValidation.js" Assembly="System.Web" Path="~/Scripts/WebForms/WebUIValidation.js" />
-                <asp:ScriptReference Name="MenuStandards.js" Assembly="System.Web" Path="~/Scripts/WebForms/MenuStandards.js" />
-                <asp:ScriptReference Name="GridView.js" Assembly="System.Web" Path="~/Scripts/WebForms/GridView.js" />
-                <asp:ScriptReference Name="DetailsView.js" Assembly="System.Web" Path="~/Scripts/WebForms/DetailsView.js" />
-                <asp:ScriptReference Name="TreeView.js" Assembly="System.Web" Path="~/Scripts/WebForms/TreeView.js" />
-                <asp:ScriptReference Name="WebParts.js" Assembly="System.Web" Path="~/Scripts/WebForms/WebParts.js" />
-                <asp:ScriptReference Name="Focus.js" Assembly="System.Web" Path="~/Scripts/WebForms/Focus.js" />
-                <asp:ScriptReference Name="WebFormsBundle" />
-                <%--Site Scripts--%>
-            </Scripts>
-        </asp:ScriptManager>
+            --border: rgba(56, 189, 248, 0.18);
+            --shadow-blue: 0 0 18px rgba(34, 211, 238, 0.18), 0 0 42px rgba(56, 189, 248, 0.10);
+            --shadow-violet: 0 0 18px rgba(139, 92, 246, 0.16), 0 0 42px rgba(139, 92, 246, 0.08);
 
-        <div class="navbar navbar-inverse navbar-fixed-top">
-            <div class="container">
-                <div class="navbar-header">
-                    <button type="button" class="navbar-toggle" data-toggle="collapse" data-target=".navbar-collapse">
-                        <span class="icon-bar"></span>
-                        <span class="icon-bar"></span>
-                        <span class="icon-bar"></span>
-                    </button>
-                    <a class="navbar-brand" runat="server" href="~/">Application name</a>
+            --radius-xl: 24px;
+            --radius-lg: 18px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            background:
+                radial-gradient(circle at top left, rgba(34, 211, 238, 0.08), transparent 28%),
+                radial-gradient(circle at top right, rgba(139, 92, 246, 0.08), transparent 30%),
+                linear-gradient(180deg, #050d18 0%, #081221 45%, #06101d 100%);
+            color: var(--text-main);
+        }
+
+        .rdlc-page {
+            position: relative;
+            overflow: hidden;
+            padding: 28px 0 36px;
+            min-height: 100vh;
+        }
+
+        .light-orb {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(30px);
+            opacity: 0.35;
+            pointer-events: none;
+            animation: floatOrb 10s ease-in-out infinite;
+        }
+
+        .orb-one {
+            width: 260px;
+            height: 260px;
+            top: 30px;
+            left: -90px;
+            background: rgba(34, 211, 238, 0.22);
+        }
+
+        .orb-two {
+            width: 300px;
+            height: 300px;
+            top: 130px;
+            right: -120px;
+            background: rgba(139, 92, 246, 0.18);
+            animation-delay: 2s;
+        }
+
+        .orb-three {
+            width: 220px;
+            height: 220px;
+            bottom: 50px;
+            left: 20%;
+            background: rgba(56, 189, 248, 0.12);
+            animation-delay: 4s;
+        }
+
+        .hero-box {
+            position: relative;
+            overflow: hidden;
+            border-radius: var(--radius-xl);
+            padding: 48px 40px;
+            background:
+                linear-gradient(135deg, rgba(8, 18, 33, 0.94), rgba(12, 26, 46, 0.92));
+            border: 1px solid rgba(56, 189, 248, 0.16);
+            box-shadow:
+                0 20px 60px rgba(0, 0, 0, 0.35),
+                inset 0 0 0 1px rgba(255,255,255,0.02),
+                0 0 40px rgba(34, 211, 238, 0.06);
+            margin-bottom: 34px;
+            animation: fadeUp 0.9s ease;
+        }
+
+        .hero-box::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                linear-gradient(120deg, transparent 0%, rgba(56, 189, 248, 0.05) 35%, transparent 70%);
+            animation: sweep 8s linear infinite;
+            pointer-events: none;
+        }
+
+        .hero-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 28px;
+            align-items: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-left {
+            flex: 1 1 560px;
+            min-width: 280px;
+        }
+
+        .hero-right {
+            flex: 0 0 320px;
+        }
+
+        .top-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 18px;
+            border-radius: 999px;
+            background: rgba(34, 211, 238, 0.08);
+            border: 1px solid rgba(34, 211, 238, 0.18);
+            color: #b9f3ff;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
+            margin-bottom: 18px;
+            box-shadow: 0 0 14px rgba(34, 211, 238, 0.10);
+        }
+
+        .top-chip .live-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--neon-green);
+            box-shadow: 0 0 10px rgba(52, 211, 153, 0.75);
+            animation: pulseGlow 2s infinite;
+        }
+
+        .hero-title {
+            margin: 0 0 14px;
+            font-size: 48px;
+            font-weight: 800;
+            line-height: 1.12;
+            color: #f2f8ff;
+            text-shadow: 0 0 12px rgba(56, 189, 248, 0.14);
+        }
+
+        .hero-title .neon-text {
+            color: var(--neon-cyan);
+            text-shadow:
+                0 0 8px rgba(34, 211, 238, 0.35),
+                0 0 18px rgba(34, 211, 238, 0.18);
+        }
+
+        .hero-subtitle {
+            margin: 0 0 26px;
+            max-width: 760px;
+            font-size: 16px;
+            line-height: 1.85;
+            color: var(--text-soft);
+        }
+
+        .hero-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+        }
+
+        .btn-neon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 170px;
+            padding: 14px 24px;
+            border-radius: 14px;
+            font-size: 15px;
+            font-weight: 700;
+            text-decoration: none !important;
+            transition: all 0.28s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn-neon-primary {
+            color: #06111d !important;
+            background: linear-gradient(135deg, var(--neon-cyan), var(--neon-blue));
+            box-shadow: 0 0 18px rgba(34, 211, 238, 0.22);
+        }
+
+        .btn-neon-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 24px rgba(34, 211, 238, 0.34), 0 10px 26px rgba(0,0,0,0.30);
+        }
+
+        .btn-neon-secondary {
+            color: #dff7ff !important;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid rgba(56, 189, 248, 0.20);
+            box-shadow: inset 0 0 10px rgba(56, 189, 248, 0.04);
+        }
+
+        .btn-neon-secondary:hover {
+            transform: translateY(-2px);
+            border-color: rgba(34, 211, 238, 0.34);
+            box-shadow: 0 0 18px rgba(34, 211, 238, 0.12);
+        }
+
+        .preview-panel {
+            border-radius: 22px;
+            padding: 22px;
+            background: rgba(7, 17, 31, 0.88);
+            border: 1px solid rgba(139, 92, 246, 0.18);
+            box-shadow:
+                0 16px 34px rgba(0, 0, 0, 0.34),
+                0 0 20px rgba(139, 92, 246, 0.10);
+            animation: floatCard 5.5s ease-in-out infinite;
+        }
+
+        .preview-dots {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 18px;
+        }
+
+        .preview-dots span {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+
+        .preview-dots span:nth-child(1) { background: #fb7185; box-shadow: 0 0 10px rgba(251, 113, 133, 0.45); }
+        .preview-dots span:nth-child(2) { background: #facc15; box-shadow: 0 0 10px rgba(250, 204, 21, 0.45); }
+        .preview-dots span:nth-child(3) { background: #4ade80; box-shadow: 0 0 10px rgba(74, 222, 128, 0.45); }
+
+        .preview-line {
+            height: 11px;
+            border-radius: 999px;
+            margin-bottom: 12px;
+            background: linear-gradient(90deg, rgba(34,211,238,.18), rgba(56,189,248,.48), rgba(139,92,246,.16));
+            background-size: 200% 100%;
+            animation: shimmer 2.6s linear infinite;
+        }
+
+        .preview-line.lg { width: 100%; }
+        .preview-line.md { width: 80%; }
+        .preview-line.sm { width: 58%; }
+
+        .section-heading {
+            text-align: center;
+            margin: 0 0 10px;
+            font-size: 34px;
+            font-weight: 800;
+            color: #eef7ff;
+            text-shadow: 0 0 12px rgba(34, 211, 238, 0.10);
+        }
+
+        .section-text {
+            text-align: center;
+            margin: 0 auto 32px;
+            max-width: 760px;
+            color: var(--text-dim);
+            font-size: 15px;
+            line-height: 1.8;
+        }
+
+        .cards-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 24px;
+        }
+
+        .info-card {
+            position: relative;
+            overflow: hidden;
+            border-radius: var(--radius-lg);
+            padding: 28px 24px;
+            background: linear-gradient(180deg, rgba(10, 22, 40, 0.92), rgba(8, 18, 33, 0.94));
+            border: 1px solid rgba(56, 189, 248, 0.14);
+            box-shadow:
+                0 12px 30px rgba(0,0,0,0.28),
+                inset 0 0 0 1px rgba(255,255,255,0.02);
+            transition: all 0.28s ease;
+        }
+
+        .info-card:hover {
+            transform: translateY(-8px);
+            border-color: rgba(34, 211, 238, 0.34);
+            box-shadow:
+                0 18px 34px rgba(0,0,0,0.36),
+                0 0 20px rgba(34, 211, 238, 0.10);
+        }
+
+        .info-card::after {
+            content: "";
+            position: absolute;
+            inset: auto -30% -60% auto;
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(34, 211, 238, 0.12), transparent 70%);
+            pointer-events: none;
+        }
+
+        .card-icon {
+            width: 60px;
+            height: 60px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 18px;
+            border-radius: 16px;
+            background: linear-gradient(135deg, rgba(34,211,238,0.14), rgba(139,92,246,0.14));
+            color: #d8f7ff;
+            font-size: 22px;
+            font-weight: 800;
+            box-shadow: var(--shadow-blue);
+        }
+
+        .info-card h3 {
+            margin: 0 0 12px;
+            font-size: 22px;
+            color: #f2f8ff;
+            font-weight: 700;
+        }
+
+        .info-card p {
+            margin: 0 0 16px;
+            color: var(--text-soft);
+            line-height: 1.8;
+            font-size: 15px;
+        }
+
+        .card-link {
+            text-decoration: none !important;
+            color: var(--neon-cyan);
+            font-weight: 700;
+            transition: all 0.25s ease;
+        }
+
+        .card-link:hover {
+            color: #b9f3ff;
+            text-shadow: 0 0 10px rgba(34,211,238,0.22);
+        }
+
+        .mini-stats {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 18px;
+            margin-top: 28px;
+        }
+
+        .stat-box {
+            padding: 20px 16px;
+            text-align: center;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid rgba(56, 189, 248, 0.10);
+            box-shadow: inset 0 0 12px rgba(34, 211, 238, 0.03);
+        }
+
+        .stat-box h4 {
+            margin: 0;
+            font-size: 26px;
+            color: var(--neon-cyan);
+            text-shadow: 0 0 10px rgba(34,211,238,0.18);
+            font-weight: 800;
+        }
+
+        .stat-box p {
+            margin: 8px 0 0;
+            color: var(--text-dim);
+            font-size: 14px;
+        }
+
+        @keyframes floatOrb {
+            0%, 100% { transform: translateY(0px) translateX(0px); }
+            50% { transform: translateY(-18px) translateX(10px); }
+        }
+
+        @keyframes pulseGlow {
+            0% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.45); }
+            70% { box-shadow: 0 0 0 10px rgba(52, 211, 153, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(52, 211, 153, 0); }
+        }
+
+        @keyframes fadeUp {
+            from {
+                opacity: 0;
+                transform: translateY(24px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        @keyframes floatCard {
+            0%,100% { transform: translateY(0px); }
+            50% { transform: translateY(-9px); }
+        }
+
+        @keyframes sweep {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(140%); }
+        }
+
+        @media (max-width: 991px) {
+            .hero-title {
+                font-size: 38px;
+            }
+
+            .cards-grid,
+            .mini-stats {
+                grid-template-columns: 1fr;
+            }
+
+            .hero-box {
+                padding: 36px 24px;
+            }
+
+            .hero-right {
+                flex: 1 1 100%;
+            }
+        }
+
+        @media (max-width: 575px) {
+            .hero-title {
+                font-size: 30px;
+            }
+
+            .hero-actions {
+                flex-direction: column;
+            }
+
+            .btn-neon {
+                width: 100%;
+            }
+
+            .section-heading {
+                font-size: 28px;
+            }
+        }
+    </style>
+
+    <div class="rdlc-page">
+        <div class="light-orb orb-one"></div>
+        <div class="light-orb orb-two"></div>
+        <div class="light-orb orb-three"></div>
+
+        <div class="hero-box">
+            <div class="hero-grid">
+                <div class="hero-left">
+                    <div class="top-chip">
+                        <span class="live-dot"></span>
+                        Reporting Workspace Active
+                    </div>
+
+                    <h1 class="hero-title">
+                        <span class="neon-text">RDLC Reports - 2026</span>
+                    </h1>
+
+                    <p class="hero-subtitle">
+                      Designer: The Microsoft RDLC Report Designer for Visual Studio provides a drag-and-drop interface for designing reports with charts, tables, and gauges.
+                    </p>
+                       <p class="hero-subtitle">
+                     Rendering: RDLC files are rendered client-side on the machine running the application, rather than on a dedicated SQL Server Reporting Services (SSRS) server.
+                    </p>
+                       <p class="hero-subtitle">
+                      VS 2022 Compatibility: For Visual Studio 2022, you must install the "Microsoft RDLC Report Designer" extension and use NuGet packages like Microsoft.ReportingServices.ReportViewerControl.Winforms.
+                    </p>
+                       <p class="hero-subtitle">
+                      .NET Core/5+ Support: While not natively supported, RDLC can be used in modern .NET by utilizing open-source ReportViewer wrappers or specific NuGet packages like ReportViewerCore.NETCore
+                    </p>
+
+                    <div class="hero-actions">
+                        <a href="Report.aspx" class="btn-neon btn-neon-primary">Open Reports</a>
+                        <a href="javascript:void(0);" class="btn-neon btn-neon-secondary">View Modules</a>
+                    </div>
                 </div>
-                <div class="navbar-collapse collapse">
-                    <ul class="nav navbar-nav">
-                        <li><a runat="server" href="~/">Home</a></li>
-                        <li><a runat="server" href="~/About">About</a></li>
-                        <li><a runat="server" href="~/Contact">Contact</a></li>
-                    </ul>
+
+                <div class="hero-right">
+                    <div class="preview-panel">
+                        <div class="preview-dots">
+                            <span></span>
+                            <span></span>
+                            <span></span>
+                        </div>
+
+                        <div class="preview-line lg"></div>
+                        <div class="preview-line md"></div>
+                        <div class="preview-line sm"></div>
+
+                        <div style="height:18px;"></div>
+
+                        <div class="preview-line lg"></div>
+                        <div class="preview-line lg"></div>
+                        <div class="preview-line md"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mini-stats">
+                <div class="stat-box">
+                    <h4>PDF</h4>
+                    <p>Report rendering and export</p>
+                </div>
+                <div class="stat-box">
+                    <h4>Excel</h4>
+                    <p>Data output and reporting flow</p>
+                </div>
+                <div class="stat-box">
+                    <h4>Secure</h4>
+                    <p>Professional and modern UI</p>
                 </div>
             </div>
         </div>
-        <div class="container body-content">
-            <asp:ContentPlaceHolder ID="MainContent" runat="server">
-            </asp:ContentPlaceHolder>
-            <hr />
-            <footer>
-                <p>&copy; <%: DateTime.Now.Year %> - My ASP.NET Application</p>
-            </footer>
-        </div>
 
-    </form>
-</body>
-</html>
+        <h2 class="section-heading">Reporting Features</h2>
+        <p class="section-text">
+            Organize your RDLC solution with a polished dashboard that feels modern, readable,
+            and comfortable for long working sessions.
+        </p>
+
+        <div class="cards-grid">
+            <div class="info-card">
+                <div class="card-icon">01</div>
+                <h3>Generate Reports</h3>
+                <p>
+                    Launch and manage report generation flows with a better first-screen experience
+                    for your RDLC reporting solution.
+                </p>
+                <a href="javascript:void(0);" class="card-link">Read more →</a>
+            </div>
+
+            <div class="info-card">
+                <div class="card-icon">02</div>
+                <h3>Export Outputs</h3>
+                <p>
+                    Handle PDF, Excel, and other reporting exports through a visually cleaner and
+                    more user-friendly landing page.
+                </p>
+                <a href="javascript:void(0);" class="card-link">Explore export flow →</a>
+            </div>
+
+            <div class="info-card">
+                <div class="card-icon">03</div>
+                <h3>Manage Workflow</h3>
+                <p>
+                    Keep report modules, report actions, and secure report processes easy to access
+                    with a sleek dark neon design.
+                </p>
+                <a href="javascript:void(0);" class="card-link">See workflow →</a>
+            </div>
+        </div>
+    </div>
+
+</asp:Content>
