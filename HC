@@ -1,14 +1,1 @@
-protected void Page_Load(object sender, EventArgs e)
-        {
 
-            if (!IsPostBack)
-            {
- if (!IsInputClean(Request.QueryString["sessionid"]) || !IsInputClean(Request.QueryString["EMNNO"]))
-                {
-                    Response.Write("Session is not Valid!");
-                    Response.Redirect("/Error.html");
-                }
-
-
-
-i want to send sessionid value on report.aspx page
