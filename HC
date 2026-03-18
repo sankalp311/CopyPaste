@@ -1,1 +1,20 @@
 
+
+City
+if {HOTELROOMBLOCKS.HBCCITY}+{HOTELROOMBLOCKS.HBCST}='' then
+    ''
+else if {HOTELROOMBLOCKS.HBCCITY}<>'' and {HOTELROOMBLOCKS.HBCST}='' then
+    {HOTELROOMBLOCKS.HBCCITY}
+else if {HOTELROOMBLOCKS.HBCCITY}<>'' and {HOTELROOMBLOCKS.HBCST}<>'' then
+    {HOTELROOMBLOCKS.HBCCITY}+', '
+else ''
+
+
+CityStZip
+Trim ({@City}+{HOTELROOMBLOCKS.HBCST}+'  '+{HOTELROOMBLOCKS.HBCZIP})
+
+
+(HRB.HBCST + ' ' + HRB.HBCZIP) AS City,    
+
+
+in this last sql select i want to add above crystal report formula implementation. so can you write the correct sql select
