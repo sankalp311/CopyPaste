@@ -1,20 +1,232 @@
-
-
-City
-if {HOTELROOMBLOCKS.HBCCITY}+{HOTELROOMBLOCKS.HBCST}='' then
-    ''
-else if {HOTELROOMBLOCKS.HBCCITY}<>'' and {HOTELROOMBLOCKS.HBCST}='' then
-    {HOTELROOMBLOCKS.HBCCITY}
-else if {HOTELROOMBLOCKS.HBCCITY}<>'' and {HOTELROOMBLOCKS.HBCST}<>'' then
-    {HOTELROOMBLOCKS.HBCCITY}+', '
-else ''
-
-
-CityStZip
-Trim ({@City}+{HOTELROOMBLOCKS.HBCST}+'  '+{HOTELROOMBLOCKS.HBCZIP})
-
-
-(HRB.HBCST + ' ' + HRB.HBCZIP) AS City,    
-
-
-in this last sql select i want to add above crystal report formula implementation. so can you write the correct sql select
+ALTER PROCEDURE sp_ICM_RPT_RoomBlockConfirmation_RDLC             
+ @EMNNO int ,        
+ @HBNNO INT        
+  /*            
+  Create by : Sankalp            
+  Created on: 16-Mar-2026            
+  desc : get the data TTSbBk112 in single result set            
+  sp_ICM_RPT_RoomBlockConfirmation_RDLC 12774 , 22792          
+  */            
+AS              
+BEGIN              
+ SET NOCOUNT ON;               
+/* =========================================            
+   MAIN BLOCK DATA (1 ROW PER HBNNO)            
+========================================= */            
+WITH MAIN AS            
+(            
+    SELECT              
+        E.EMNNO,              
+        HRB.HBNNO,              
+        E.EMCNM,            
+            
+        FORMAT(E.EMDTBEG,'dddd, d MMMM, yyyy') + ' - ' +            
+        FORMAT(E.EMDTEND,'dddd, d MMMM, yyyy') AS EventBegDate,            
+            
+        FORMAT(E.EMDTEND,'dddd, d MMMM, yyyy') AS EventEndDate,            
+            
+        CAST(E.EMCHTLHDR AS NVARCHAR(MAX)) EMCHTLHDR,            
+        E.EMCNO,            
+            
+        HRB.HBCAD1,            
+        (HRB.HBCFNM + ' ' + HRB.HBCLNM) AS HBCFNM,            
+        HRB.HBCLNM,            
+        HRB.HBCNO,            
+        HRB.HBCORG,            
+        HRB.HBCTEL,            
+        HRB.HBCMOBILE,            
+        HRB.HBCEMAIL,            
+        HRB.HBCACRO,            
+        HRB.HBNAPPROVED,            
+        CAST(HRB.HBCSPECIALREQUESTSTRING AS NVARCHAR(MAX)) HBCSPECIALREQUESTSTRING,            
+	  CASE               
+			WHEN HRB.HBTEAMCUTOFFDATE IS not NULL               
+				THEN  Format(HRB.HBTEAMCUTOFFDATE,'dddd, MMMM dd,yyyy')+'  12:01AM EST'              
+			ELSE FORMAT(HRB.HBOVERWRITECUTOFFDATE, 'dddd, MMMM dd,yyyy')+'  12:01AM EST'               
+		END AS HBOVERWRITECUTOFFDATE,            
+            
+			HRB.HBCAD2,            
+			LTRIM(RTRIM(
+		CASE
+			WHEN ISNULL(HRB.HBCCITY, '') + ISNULL(HRB.HBCST, '') = '' THEN ''
+			WHEN ISNULL(HRB.HBCCITY, '') <> '' AND ISNULL(HRB.HBCST, '') = '' THEN ISNULL(HRB.HBCCITY, '')
+			WHEN ISNULL(HRB.HBCCITY, '') <> '' AND ISNULL(HRB.HBCST, '') <> '' THEN ISNULL(HRB.HBCCITY, '') + ', '
+			ELSE ''
+		END
+		+ ISNULL(HRB.HBCST, '')
+		+ CASE 
+			WHEN ISNULL(HRB.HBCZIP, '') <> '' THEN '  ' + ISNULL(HRB.HBCZIP, '')
+			ELSE ''
+		  END
+	)) AS City,            
+        HRB.HBCREGN,            
+        HRB.HBCCTRY,            
+            
+        FORMAT(DATEADD(DAY,1,MAX(HRBI.RBDATE)),'dddd, d MMMM, yyyy') AS CheckoutDate,            
+            
+        CAST(H.HTCHDR AS NVARCHAR(MAX)) HTCHDR,            
+        H.HTCDSC,            
+        H.HTCAD1,            
+        H.HTCAD2,            
+        ISNULL(H.HTCCITY,'') + ' ' +            
+        ISNULL(H.HTCST,'') + ' ' +            
+        ISNULL(H.HTCZIP,'') AS HTCADD,            
+        H.HTCREGN,            
+        H.HTCCNTRY,            
+            
+        RC.RCCDESC,            
+        CAST(H.HTCFEATURES AS NVARCHAR(MAX)) HTCFEATURES,            
+            
+        /* FIXED AVG RATE */            
+        CASE            
+            WHEN COUNT(DISTINCT HRBI.HINNO) = 0 THEN '0.00'            
+            ELSE '$' + FORMAT(            
+                    SUM(HRTC.HCNCOST)            
+                    / COUNT(DISTINCT HRBI.HINNO)            
+                ,'N2')            
+        END AS AvgRate,            
+  'https://app.ttievent.com/admin/WebDesign/OnlineReservation?emcno='            
+  + CAST(E.EMCNO AS VARCHAR(20)) + CHAR(13) + CHAR(10)            
+  + '&pagetype=Reservation&categorycode=&blockacro=' + ISNULL(HRB.HBCACRO, '') AS ReservationUrl,            
+  MAX(HRBI.RBNAMOUNTRESERVED) RBNAMOUNTRESERVED,            
+  MAX(HRBI.RBNAMOUNTREQUESTED) RBNAMOUNTREQUESTED,            
+  HRB.HBDTREQUESTED            
+            
+    FROM EVENTS E            
+    JOIN HOTEL H ON E.EMNNO = H.EMNNO            
+    JOIN HOTELROOMBLOCKS HRB ON HRB.HTNNO = H.HTNNO            
+    JOIN HOTELROOMBLOCKINVENTORY HRBI ON HRB.HBNNO = HRBI.HBNNO            
+    JOIN ROOMCATEGORIES RC ON RC.RCNNO = HRB.RCNNO            
+    JOIN HOTELROOMTYPECOSTS HRTC ON HRTC.HINNO = HRBI.HINNO AND HRB.RTNNO = HRTC.RTNNO            
+            
+    WHERE E.EMNNO = @EMNNO         
+    AND HRB.HBNNO=@HBNNO    
+            
+    GROUP BY            
+        E.EMNNO, HRB.HBNNO, E.EMCNM,            
+        E.EMDTBEG, E.EMDTEND,            
+        CAST(E.EMCHTLHDR AS NVARCHAR(MAX)),          
+        E.EMCNO,            
+        HRB.HBCAD1, HRB.HBCFNM, HRB.HBCLNM,            
+        HRB.HBCNO, HRB.HBCORG,            
+        HRB.HBCTEL, HRB.HBCMOBILE, HRB.HBCEMAIL,            
+        HRB.HBCACRO, HRB.HBNAPPROVED,            
+  CAST(HRB.HBCSPECIALREQUESTSTRING AS NVARCHAR(MAX)),            
+        HRB.HBTEAMCUTOFFDATE, HRB.HBOVERWRITECUTOFFDATE,            
+        HRB.HBCAD2, HRB.HBCST, HRB.HBCZIP,            
+        HRB.HBCREGN, HRB.HBCCTRY,            
+        CAST(H.HTCHDR AS NVARCHAR(MAX)),            
+        H.HTCDSC, H.HTCAD1, H.HTCAD2,            
+        H.HTCCITY, H.HTCST, H.HTCZIP,            
+        H.HTCREGN, H.HTCCNTRY,            
+        RC.RCCDESC,            
+        CAST(H.HTCFEATURES AS NVARCHAR(MAX)),HRB.HBDTREQUESTED            
+)            
+            
+/* =========================================            
+   FINAL RESULT            
+========================================= */            
+SELECT            
+    M.*,            
+            
+    /* INVENTORY */            
+    I.RBDATE,            
+    I.Total,            
+    I.Sold,            
+    I.RBNREMAININGAVAILABLE,            
+ I.sortdate,            
+            
+    /* RESERVATION */            
+    R.Sno,            
+    R.FullName,            
+    R.HTCACRO,            
+    R.AvgRate1,            
+    R.RCCDESC1,            
+    R.RSDTARR,            
+    R.RSDTDEP,            
+    R.RSDTXLD,            
+    R.XLD,            
+ CASE             
+    WHEN ROW_NUMBER() OVER (PARTITION BY M.HBCNO ORDER BY I.sortdate) = 1             
+    THEN 'Check-in: '             
+    ELSE ''             
+END AS CheckInText            
+            
+FROM MAIN M            
+            
+/* ================= INVENTORY ================= */            
+OUTER APPLY            
+(            
+    SELECT            
+        ROW_NUMBER() OVER (ORDER BY RBDATE) AS RN,            
+  RBDATE as sortdate,            
+        FORMAT(RBDATE,'dddd, d MMMM, yyyy') AS RBDATE,            
+        (RBNAMOUNTRESERVED + RBNADJUSTMENTS) AS Total,            
+        (RBNAMOUNTRESERVED + RBNADJUSTMENTS) - RBNREMAININGAVAILABLE AS Sold,            
+        RBNREMAININGAVAILABLE            
+    FROM HOTELROOMBLOCKINVENTORY            
+    WHERE HBNNO = M.HBNNO             
+) I             
+            
+/* ================= RESERVATIONS ================= */            
+OUTER APPLY            
+(            
+     SELECT    
+        ROW_NUMBER() OVER    
+        (    
+            ORDER BY    
+                CASE WHEN HRB2.HBCNO IS NULL THEN 1 ELSE 0 END,    
+                HRB2.HBCNO,    
+                RG.RGCPLNM,    
+                RG.RGCPFNM,    
+                R.RSDTARR,    
+                R.RSDTDEP,    
+                R.RSNNO    
+        ) AS Sno,    
+    
+        R.RSNNO,    
+        HRB2.HBCNO,    
+        (RG.RGCPLNM + ', ' + RG.RGCPFNM) AS FullName,    
+        H.HTCACRO,    
+    
+        CASE    
+            WHEN ISNULL(RN.NightCount, 0) = 0 THEN '0.00'    
+            ELSE FORMAT(ISNULL(RN.TotalCost, 0) / NULLIF(RN.NightCount, 0), 'N2')    
+        END AS AvgRate1,    
+    
+        RC.RCCDESC AS RCCDESC1,    
+        FORMAT(R.RSDTARR, 'MMM dd') AS RSDTARR,    
+        FORMAT(R.RSDTDEP, 'MMM dd yy') AS RSDTDEP,    
+        R.RSDTXLD,    
+        CASE    
+            WHEN R.RSDTXLD IS NULL THEN ''    
+            ELSE 'Xld'    
+        END AS XLD    
+    
+    FROM RESERVATIONS R    
+    JOIN REGMST RG    
+        ON RG.RGNNO = R.RGNNO    
+    JOIN HOTELROOMBLOCKS HRB2    
+        ON HRB2.HBNNO = R.HBNNO    
+    JOIN HOTEL H    
+        ON H.HTNNO = HRB2.HTNNO    
+    JOIN ROOMCATEGORIES RC    
+        ON RC.RCNNO = HRB2.RCNNO    
+    
+    OUTER APPLY    
+    (    
+        SELECT    
+            COUNT(*) AS NightCount,    
+            SUM(HRTC.HCNCOST) AS TotalCost    
+        FROM RESNIGHTS RN    
+        LEFT JOIN HOTELROOMTYPECOSTS HRTC    
+            ON HRTC.HINNO = RN.HINNO    
+        WHERE RN.RSNNO = R.RSNNO    
+    ) RN    
+    
+    WHERE R.HBNNO = M.HBNNO           
+              
+) R            
+            
+ORDER BY M.HBCNO, R.Sno;            
+END
