@@ -1,287 +1,219 @@
- if ($("#RepoAcro").text().trim() === 'HT152 - EG') {
-      debugger;
-      // Controller URL (from Razor)
-      var baseUrl = (window.appRoutes && window.appRoutes.ht152EGCore)
-           ? window.appRoutes.ht152EGCore
-           : '/Admin/ReportHT152EG/Index'; // fallback
-
-      var location = baseUrl;
-
-      var win = window.open(
-           location,
-           'ReportWindow',
-           'width=1000,height=800,toolbar=no,location=no,menubar=no,resizable=yes,scrollbars=yes'
-      );
-
-      if (win) win.focus();
-
-      return;
- }
- 
- 
- 
- 
- using AspNetCore.Reporting; // if you use this renderer
-using EventManagerWeb.Areas.Admin.Models;
-using EventManagerWeb.Filter;
-using EventManagerWeb.Repository.IRepository;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace EventManagerWeb.Areas.Admin.Controllers
-{
-	[AuthorizationFilter]
-	//[Area("Admin")]
-	public class ReportHT152EGController : Controller
-	{
-		private readonly IReportHT152EGRepository _repo;
-		private readonly IWebHostEnvironment _env;
-
-		static ReportHT152EGController()
-		{
-			// Required by RDLC renderer in .NET Core for some encodings
-			Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-		}
-
-		public ReportHT152EGController(IReportHT152EGRepository repo, IWebHostEnvironment env)
-		{
-			_repo = repo;
-			_env = env;
-		}
-
-		[HttpGet]
-		public async Task<IActionResult> Index()
-		{
-			var EMCNO = HttpContext.Session.GetString("EventId") ?? "";
-
-			var vm = new ReportGroupsHT152Vm
-			{
-				EMCNO = EMCNO,
-				SelectedHotelId = "",
-				Comments = ""
-			};
-
-			var hotels = await _repo.BindHotelList(EMCNO);
-			vm.Hotels.Clear();
-			vm.Hotels.Add(new SelectItemVm("", "-- Select Hotel --"));
-			if (hotels != null) vm.Hotels.AddRange(hotels);
-
-			vm.EnsureDefaults();
-			return View(vm);
-		}
-
-		// ✅ Called when hotel changes (auto bind From/To)
-		[HttpPost]
-		public async Task<IActionResult> GetDefaultFromTo([FromBody] Ht152DefaultFromToRequestVm req)
-		{
-			req.EMCNO = HttpContext.Session.GetString("EventId") ?? req.EMCNO;
-			var USNNO = HttpContext.Session.GetString("USNNO") ?? "";
-
-			// 1) existing call to API (gets From/To + EMNNO resolved)
-			var result = await _repo.GetDefaultFromTo(req);
-			if (result == null) return Ok(null);
-
-			//  OVERRIDE only TO values with current datetime
-			if (result != null)
-			{
-				var now = DateTime.Now;
-
-				result.ToDate = now.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
-
-				var hour12 = now.Hour % 12;
-				if (hour12 == 0) hour12 = 12;
-
-				result.ToHour = hour12.ToString("00");
-				result.ToMin = now.Minute.ToString("00");
-				result.ToAmPm = now.Hour >= 12 ? "PM" : "AM";
-			}
-
-
-			// 2) ✅ also fetch history for this hotel
-			var history = await _repo.GetExportReportList(new ApiExportHistoryRequest
-			{
-				USNNO = USNNO,
-				EMNNO = result.EMNNO,
-				HTNNO = req.HotelId
-			});
-
-			result.History = history ?? new List<ReportRowVm>();
-
-			return Ok(result);
-		}
-
-
-
-		// ✅ Main: Generate New/Changed/Canceled, save pdf, insert EXPORT_REPORT_LIST, return history
-		[HttpPost]
-		public async Task<IActionResult> Process([FromBody] Ht152ProcessRequestVm req)
-		{
-			var EMCNO = HttpContext.Session.GetString("EventId") ?? "";
-			var USNNO = HttpContext.Session.GetString("USNNO") ?? ""; // adjust if your session key differs
-			var currentDate = DateTime.Now;
-
-			if (req.HotelId <= 0) return BadRequest("Hotel required");
-
-			var actions = new List<string>();
-			if (req.ChkNew) actions.Add("New");
-			if (req.ChkChanged) actions.Add("Changed");
-			if (req.ChkCanceled) actions.Add("Canceled");
-			if (actions.Count == 0) return BadRequest("Select at least one report type");
-
-			var generated = new List<Ht152GeneratedItemVm>();
-
-			int resolvedEmnno = 0;
-			string htcacro = "";
-
-			foreach (var action in actions)
-			{
-				var apiReq = new ApiHt152ReportDataRequest
-				{
-					Action = action,
-					EMCNO = EMCNO,
-					EMNNO = resolvedEmnno,     // 0 on first call; API can resolve from EMCNO
-					HTNNO = req.HotelId,
-					REPORTID = req.REPORTID,   // pass your legacy reportId if you have
-					USER = USNNO,
-					CurrentDate = currentDate,
-
-					FromDate = req.FromDate,
-					ToDate = req.ToDate,
-					FrmHour = req.FrmHour,
-					FrmMin = req.FrmMin,
-					FrmAmPm = req.FrmAmPm,
-					ToHour = req.ToHour,
-					ToMin = req.ToMin,
-					ToAmPm = req.ToAmPm,
-				};
-
-				var apiResp = await _repo.GetReportData(apiReq);
-				if (apiResp == null) continue;
-
-				resolvedEmnno = apiResp.EMNNO;
-				htcacro = apiResp.HTCACRO;
-
-				// convert API rows -> DataTable for RDLC
-				var dt = ToDataTable(apiResp.Rows);
-
-				// pick RDLC + dataset name same as legacy
-				var (rdlcName, dsName) = action switch
-				{
-					"New" => ("HT152_New.rdlc", "NewDataSet"),
-					"Changed" => ("HT152_Changed.rdlc", "ChangedDataSet"),
-					"Canceled" => ("HT152_Canceled.rdlc", "CanceledDataSet"),
-					_ => throw new ArgumentOutOfRangeException()
-				};
-
-				// Adjust this path to where you store RDLC in Web project
-				var rdlcPath = Path.Combine(_env.ContentRootPath, "Forms", "Reports", rdlcName);
-
-				// legacy parameters dateFrom/dateTo
-				var fromDt = BuildDateTime(req.FromDate, req.FrmHour, req.FrmMin, req.FrmAmPm);
-				var toDt = BuildDateTime(req.ToDate, req.ToHour, req.ToMin, req.ToAmPm);
-
-				//var pdfBytes = RenderPdf_AspNetCoreReporting(rdlcPath, dsName, dt,
-				//    new Dictionary<string, string>
-				//    {
-				//	    ["dateFrom"] = fromDt.ToString("MM/dd/yyyy HH:mm"),
-				//	    ["dateTo"] = toDt.ToString("MM/dd/yyyy HH:mm")
-				//    });
-
-				// save to wwwroot/Forms/Reports/ReportsFolder (so url works)
-				var stamp = currentDate.ToString("MM-dd-yyyy HH-mm-ss");
-				var fileName = $"{EMCNO}_{htcacro}_{action}_{stamp} {req.ToAmPm}.pdf";
-				var relUrl = $"/Forms/Reports/ReportsFolder/{fileName}";
-
-				var folder = Path.Combine(_env.WebRootPath, "Forms", "Reports", "ReportsFolder");
-				Directory.CreateDirectory(folder);
-
-				var physicalPath = Path.Combine(folder, fileName);
-				//	await System.IO.File.WriteAllBytesAsync(physicalPath, pdfBytes);
-
-				// insert EXPORT_REPORT_LIST (same as legacy Global.InsertReportList)
-				await _repo.InsertReportList(new ApiInsertReportListRequest
-				{
-					USNNO = USNNO,
-					EMNNO = resolvedEmnno,
-					HTNNO = req.HotelId,
-					RPTURL = relUrl,          // store URL, not physical path
-					RPTTYPE = action,
-					CURRENTDATE = currentDate
-				});
-
-				generated.Add(new Ht152GeneratedItemVm
-				{
-					Type = action,
-					Url = relUrl,
-					FileName = fileName
-				});
-			}
-
-			// refresh history list
-			var history = await _repo.GetExportReportList(new ApiExportHistoryRequest
-			{
-				USNNO = USNNO,
-				EMNNO = resolvedEmnno,
-				HTNNO = req.HotelId
-			});
-
-			return Ok(new { generated, history });
-		}
-
-		// ---------------- helpers ----------------
-
-		private static DateTime BuildDateTime(string mmddyyyy, string hour, string min, string ampm)
-		{
-			var d = DateTime.ParseExact(mmddyyyy, "MM/dd/yyyy", CultureInfo.InvariantCulture);
-
-			int h = int.Parse(hour);
-			int m = int.Parse(min);
-
-			// same legacy conversion
-			if (ampm == "PM" && h != 12) h += 12;
-			if (ampm == "AM" && h == 12) h = 0;
-
-			return new DateTime(d.Year, d.Month, d.Day, h, m, 0);
-		}
-
-		private static DataTable ToDataTable(List<Dictionary<string, object?>> rows)
-		{
-			var dt = new DataTable();
-			if (rows == null || rows.Count == 0) return dt;
-
-			// columns
-			foreach (var col in rows[0].Keys)
-				dt.Columns.Add(col);
-
-			// rows
-			foreach (var r in rows)
-			{
-				var dr = dt.NewRow();
-				foreach (var kv in r)
-					dr[kv.Key] = kv.Value ?? DBNull.Value;
-
-				dt.Rows.Add(dr);
-			}
-			return dt;
-		}
-
-		// ✅ RDLC PDF renderer (AspNetCore.Reporting)
-		//private static byte[] RenderPdf_AspNetCoreReporting(string rdlcPath, string dataSourceName, DataTable dt, Dictionary<string, string> parameters)
-		//{
-		//	var local = new LocalReport(rdlcPath);
-		//	local.AddDataSource(dataSourceName, dt);
-
-		//	var result = local.Execute(RenderType.Pdf, 1, parameters, out string mimeType);
-		//	return result.MainStream;
-		//}
-	}
-}
+CREATE PROCEDURE sp_ICM_RPT_RoomBlockConfirmation_RDLC               
+ @EMNNO int ,          
+ @HBNNO INT          
+  /*              
+  Create by : Sankalp              
+  Created on: 16-Mar-2026              
+  desc : get the data TTSbBk112 in single result set              
+  sp_ICM_RPT_RoomBlockConfirmation_RDLC 12774 , 22792            
+  */              
+AS                
+BEGIN                
+ SET NOCOUNT ON;                 
+/* =========================================              
+   MAIN BLOCK DATA (1 ROW PER HBNNO)              
+========================================= */              
+WITH MAIN AS              
+(              
+    SELECT                
+        E.EMNNO,                
+        HRB.HBNNO,                
+        E.EMCNM,              
+              
+        FORMAT(E.EMDTBEG,'dddd, d MMMM, yyyy') + ' - ' +              
+        FORMAT(E.EMDTEND,'dddd, d MMMM, yyyy') AS EventBegDate,              
+              
+        FORMAT(E.EMDTEND,'dddd, d MMMM, yyyy') AS EventEndDate,              
+              
+        CAST(E.EMCHTLHDR AS NVARCHAR(MAX)) EMCHTLHDR,              
+        E.EMCNO,              
+              
+        HRB.HBCAD1,              
+        (HRB.HBCFNM + ' ' + HRB.HBCLNM) AS HBCFNM,              
+        HRB.HBCLNM,              
+        HRB.HBCNO,              
+        HRB.HBCORG,              
+        HRB.HBCTEL,              
+        HRB.HBCMOBILE,              
+        HRB.HBCEMAIL,              
+        HRB.HBCACRO,              
+        HRB.HBNAPPROVED,              
+        CAST(HRB.HBCSPECIALREQUESTSTRING AS NVARCHAR(MAX)) HBCSPECIALREQUESTSTRING,              
+  CASE                 
+        WHEN HRB.HBTEAMCUTOFFDATE IS not NULL                 
+            THEN  Format(HRB.HBTEAMCUTOFFDATE,'dddd, MMMM dd,yyyy')+'  12:01AM EST'                
+        ELSE FORMAT(HRB.HBOVERWRITECUTOFFDATE, 'dddd, MMMM dd,yyyy')+'  12:01AM EST'                 
+    END AS HBOVERWRITECUTOFFDATE,              
+              
+        HRB.HBCAD2,              
+        (HRB.HBCST + ' ' + HRB.HBCZIP) AS City,              
+        HRB.HBCREGN,              
+        HRB.HBCCTRY,              
+              
+        FORMAT(DATEADD(DAY,1,MAX(HRBI.RBDATE)),'dddd, d MMMM, yyyy') AS CheckoutDate,              
+              
+        CAST(H.HTCHDR AS NVARCHAR(MAX)) HTCHDR,              
+        H.HTCDSC,              
+        H.HTCAD1,              
+        H.HTCAD2,              
+        ISNULL(H.HTCCITY,'') + ' ' +              
+        ISNULL(H.HTCST,'') + ' ' +              
+        ISNULL(H.HTCZIP,'') AS HTCADD,              
+        H.HTCREGN,              
+        H.HTCCNTRY,              
+              
+        RC.RCCDESC,              
+        CAST(H.HTCFEATURES AS NVARCHAR(MAX)) HTCFEATURES,              
+              
+        /* FIXED AVG RATE */              
+        CASE              
+            WHEN COUNT(DISTINCT HRBI.HINNO) = 0 THEN '0.00'              
+            ELSE '$' + FORMAT(              
+                    SUM(HRTC.HCNCOST)              
+                    / COUNT(DISTINCT HRBI.HINNO)              
+                ,'N2')              
+        END AS AvgRate,              
+  'https://app.ttievent.com/admin/WebDesign/OnlineReservation?emcno='+ CAST(E.EMCNO AS VARCHAR(20)) + CHAR(13) + CHAR(10)+ '&pagetype=Reservation&categorycode=&blockacro=' + ISNULL(HRB.HBCACRO, '') AS ReservationUrl,              
+  MAX(HRBI.RBNAMOUNTRESERVED) [RBNAMOUNTRESERVED],              
+  MAX(HRBI.RBNAMOUNTREQUESTED) [RBNAMOUNTREQUESTED],              
+  HRB.HBDTREQUESTED              
+              
+    FROM EVENTS E              
+    JOIN HOTEL H ON E.EMNNO = H.EMNNO              
+    JOIN HOTELROOMBLOCKS HRB ON HRB.HTNNO = H.HTNNO              
+    JOIN HOTELROOMBLOCKINVENTORY HRBI ON HRB.HBNNO = HRBI.HBNNO              
+    JOIN ROOMCATEGORIES RC ON RC.RCNNO = HRB.RCNNO              
+    JOIN HOTELROOMTYPECOSTS HRTC ON HRTC.HINNO = HRBI.HINNO AND HRB.RTNNO = HRTC.RTNNO              
+              
+    WHERE E.EMNNO = @EMNNO           
+    AND HRB.HBNNO=@HBNNO      
+              
+ GROUP BY              
+        E.EMNNO, HRB.HBNNO, E.EMCNM,              
+        E.EMDTBEG, E.EMDTEND,              
+        CAST(E.EMCHTLHDR AS NVARCHAR(MAX)),              
+        E.EMCNO,              
+        HRB.HBCAD1, HRB.HBCFNM, HRB.HBCLNM,              
+        HRB.HBCNO, HRB.HBCORG,              
+        HRB.HBCTEL, HRB.HBCMOBILE, HRB.HBCEMAIL,              
+        HRB.HBCACRO, HRB.HBNAPPROVED,              
+  CAST(HRB.HBCSPECIALREQUESTSTRING AS NVARCHAR(MAX)),              
+        HRB.HBTEAMCUTOFFDATE, HRB.HBOVERWRITECUTOFFDATE,              
+        HRB.HBCAD2, HRB.HBCST, HRB.HBCZIP,              
+        HRB.HBCREGN, HRB.HBCCTRY,              
+        CAST(H.HTCHDR AS NVARCHAR(MAX)),              
+        H.HTCDSC, H.HTCAD1, H.HTCAD2,              
+        H.HTCCITY, H.HTCST, H.HTCZIP,              
+        H.HTCREGN, H.HTCCNTRY,              
+        RC.RCCDESC,              
+        CAST(H.HTCFEATURES AS NVARCHAR(MAX)),HRBI.RBNAMOUNTRESERVED,              
+  HRBI.RBNAMOUNTREQUESTED,HRB.HBDTREQUESTED              
+)              
+              
+/* =========================================              
+   FINAL RESULT              
+========================================= */              
+SELECT              
+    M.*,              
+              
+    /* INVENTORY */              
+    I.RBDATE,              
+    I.Total,              
+    I.Sold,              
+    I.RBNREMAININGAVAILABLE,              
+ I.sortdate,              
+              
+    /* RESERVATION */              
+    R.Sno,              
+    R.FullName,              
+    R.HTCACRO,              
+    R.AvgRate1,              
+    R.RCCDESC1,              
+    R.RSDTARR,              
+    R.RSDTDEP,              
+    R.RSDTXLD,              
+    R.XLD,              
+ CASE               
+    WHEN ROW_NUMBER() OVER (PARTITION BY M.HBCNO ORDER BY I.sortdate) = 1               
+    THEN 'Check-in: '               
+    ELSE ''               
+END AS CheckInText              
+              
+FROM MAIN M              
+              
+/* ================= INVENTORY ================= */              
+OUTER APPLY              
+(              
+    SELECT              
+        ROW_NUMBER() OVER (ORDER BY RBDATE) AS RN,              
+  RBDATE as sortdate,              
+        FORMAT(RBDATE,'dddd, d MMMM, yyyy') AS RBDATE,              
+        (RBNAMOUNTRESERVED + RBNADJUSTMENTS) AS Total,              
+        (RBNAMOUNTRESERVED + RBNADJUSTMENTS) - RBNREMAININGAVAILABLE AS Sold,              
+        RBNREMAININGAVAILABLE              
+    FROM HOTELROOMBLOCKINVENTORY              
+    WHERE HBNNO = M.HBNNO               
+) I               
+              
+/* ================= RESERVATIONS ================= */              
+OUTER APPLY              
+(              
+     SELECT      
+        ROW_NUMBER() OVER      
+        (      
+            ORDER BY      
+                CASE WHEN HRB2.HBCNO IS NULL THEN 1 ELSE 0 END,      
+                HRB2.HBCNO,      
+                RG.RGCPLNM,      
+                RG.RGCPFNM,      
+                R.RSDTARR,      
+                R.RSDTDEP,      
+                R.RSNNO      
+        ) AS Sno,      
+      
+        R.RSNNO,      
+        HRB2.HBCNO,      
+        (RG.RGCPLNM + ', ' + RG.RGCPFNM) AS FullName,      
+        H.HTCACRO,      
+      
+        CASE      
+            WHEN ISNULL(RN.NightCount, 0) = 0 THEN '0.00'      
+            ELSE FORMAT(ISNULL(RN.TotalCost, 0) / NULLIF(RN.NightCount, 0), 'N2')      
+        END AS AvgRate1,      
+      
+        RC.RCCDESC AS RCCDESC1,      
+        FORMAT(R.RSDTARR, 'MMM dd') AS RSDTARR,      
+        FORMAT(R.RSDTDEP, 'MMM dd yy') AS RSDTDEP,      
+        R.RSDTXLD,      
+        CASE      
+            WHEN R.RSDTXLD IS NULL THEN ''      
+            ELSE 'Xld'      
+        END AS XLD      
+      
+    FROM RESERVATIONS R      
+    JOIN REGMST RG      
+        ON RG.RGNNO = R.RGNNO      
+    JOIN HOTELROOMBLOCKS HRB2      
+        ON HRB2.HBNNO = R.HBNNO      
+    JOIN HOTEL H      
+        ON H.HTNNO = HRB2.HTNNO      
+    JOIN ROOMCATEGORIES RC      
+        ON RC.RCNNO = HRB2.RCNNO      
+      
+    OUTER APPLY      
+    (      
+        SELECT      
+            COUNT(*) AS NightCount,      
+            SUM(HRTC.HCNCOST) AS TotalCost      
+        FROM RESNIGHTS RN      
+        LEFT JOIN HOTELROOMTYPECOSTS HRTC      
+            ON HRTC.HINNO = RN.HINNO      
+        WHERE RN.RSNNO = R.RSNNO      
+    ) RN      
+      
+    WHERE R.HBNNO = M.HBNNO             
+                
+) R              
+              
+ORDER BY M.HBCNO, R.Sno;              
+END
