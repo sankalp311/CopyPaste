@@ -1,43 +1,137 @@
-=IIF(Len(Trim(First(Fields!HTCAD1.Value) & "")) > 0,
-    Trim(First(Fields!HTCAD1.Value) & ""),
-    ""
-)
-& IIF(Len(Trim(First(Fields!HTCAD2.Value) & "")) > 0,
-    IIF(Len(Trim(First(Fields!HTCAD1.Value) & "")) > 0, "<br/>", "") & Trim(First(Fields!HTCAD2.Value) & ""),
-    ""
-)
-& IIF(Len(Trim(First(Fields!HTCADD.Value) & "")) > 0,
-    IIF(
-        Len(Trim(First(Fields!HTCAD1.Value) & "")) > 0
-        OR Len(Trim(First(Fields!HTCAD2.Value) & "")) > 0,
-        "<br/>",
-        ""
-    ) & Trim(First(Fields!HTCADD.Value) & ""),
-    ""
-)
-& IIF(Len(Trim(First(Fields!HTCREGN.Value) & "")) > 0,
-    IIF(
-        Len(Trim(First(Fields!HTCAD1.Value) & "")) > 0
-        OR Len(Trim(First(Fields!HTCAD2.Value) & "")) > 0
-        OR Len(Trim(First(Fields!HTCADD.Value) & "")) > 0,
-        "<br/>",
-        ""
-    ) & Trim(First(Fields!HTCREGN.Value) & ""),
-    ""
-)
-& IIF(Len(Trim(First(Fields!HTCCNTRY.Value) & "")) > 0,
-    IIF(
-        Len(Trim(First(Fields!HTCAD1.Value) & "")) > 0
-        OR Len(Trim(First(Fields!HTCAD2.Value) & "")) > 0
-        OR Len(Trim(First(Fields!HTCADD.Value) & "")) > 0
-        OR Len(Trim(First(Fields!HTCREGN.Value) & "")) > 0,
-        "<br/>",
-        ""
-    ) & Trim(First(Fields!HTCCNTRY.Value) & ""),
-    ""
-)
+ private void ProcessRequest()
+          {
+               string emnno = QS("EMNNO");
+               string htnno = QS("HTNNO");
+               string runTimeStr = QS("RunTime");
+
+               string toEmail = QS("ToEmail");
+               if (string.IsNullOrWhiteSpace(toEmail)) toEmail = QS("Email");
+
+               bool reportEmail = IsYes(QS("ReportEmail"));
+
+               DateTime runTime;
+               bool hasRunTime = DateTime.TryParse(runTimeStr, out runTime);
+
+               DataSet ds = GetDataFromSp(
+                   emnno: emnno,
+                   htnno: htnno,
+                   runTime: hasRunTime ? (DateTime?)runTime : null
+               );
+
+               DataTable t0 = (ds.Tables.Count > 0) ? ds.Tables[0] : new DataTable(); // RoomList
+               DataTable t1 = (ds.Tables.Count > 1) ? ds.Tables[1] : new DataTable(); // ChangeLog
+               DataTable t2 = (ds.Tables.Count > 2) ? ds.Tables[2] : new DataTable(); // Accepted(Header)
+
+               t0.TableName = DS_ROOMLIST;
+               t1.TableName = DS_CHANGELOG;
+               t2.TableName = DS_HEADER;
+
+               string rdlcPath = Server.MapPath(REPORT_PATH);
+               if (string.IsNullOrWhiteSpace(rdlcPath) || !System.IO.File.Exists(rdlcPath))
+                    throw new Exception("RDLC file not found at: " + REPORT_PATH);
+
+               LocalReport report = new LocalReport { ReportPath = rdlcPath };
+               report.DataSources.Clear();
+
+               report.DataSources.Add(new ReportDataSource(DS_ROOMLIST, t0));
+               report.DataSources.Add(new ReportDataSource("HC", t0));
+               report.DataSources.Add(new ReportDataSource(DS_CHANGELOG, t1));
+               report.DataSources.Add(new ReportDataSource(DS_HEADER, t2));
+
+               string deviceInfo = @"<DeviceInfo>
+        <OutputFormat>PDF</OutputFormat>
+        <PageWidth>10in</PageWidth>
+        <MarginTop>0.25in</MarginTop>
+        <MarginLeft>0.25in</MarginLeft>
+        <MarginRight>0.25in</MarginRight>
+        <MarginBottom>0.25in</MarginBottom>
+    </DeviceInfo>";
+
+               string mimeType, encoding, extension;
+               Warning[] warnings;
+               string[] streams;
+
+               byte[] pdfBytes = report.Render(
+                   "PDF",
+                   deviceInfo,
+                   out mimeType,
+                   out encoding,
+                   out extension,
+                   out streams,
+                   out warnings
+               );
+
+               string subject = "Hotel Confirmation - Room List Accepted";
+               string bodyHtml = BuildEmailTemplateHtml();
+
+               SendEmailWithPdf(toEmail.Trim(), subject, bodyHtml, pdfBytes, "HotelConfirmation.pdf");
+
+               // EMAIL MODE
+               if (reportEmail)
+               {
+                    bool shouldSendEmail = false;
+
+                    if (hasRunTime)
+                         shouldSendEmail = ShouldSendHotelExportEmail(runTime);
+
+                    if (shouldSendEmail)
+                    {
+                         string email1 = ConfigurationManager.AppSettings["HotelExportEmail1"];
+                         string email2 = ConfigurationManager.AppSettings["HotelExportEmail2"];
+
+                         List<string> recipients = new List<string>();
+
+                         if (!string.IsNullOrWhiteSpace(email1))
+                              recipients.Add(email1.Trim());
+
+                         if (!string.IsNullOrWhiteSpace(email2))
+                              recipients.Add(email2.Trim());
+
+                         recipients = recipients
+                             .Where(x => !string.IsNullOrWhiteSpace(x))
+                             .Distinct(StringComparer.OrdinalIgnoreCase)
+                             .ToList();
+
+                         if (recipients.Count == 0)
+                              throw new Exception("SP returned true, but HotelExportEmail1 / HotelExportEmail2 not found in appSettings.");
+
+                         string subjectin = "Hotel Confirmation - Room List Accepted";
+                         string bodyHtmlin = BuildEmailTemplateHtml();
+
+                         foreach (string recipient in recipients)
+                         {
+                              SendEmailWithPdf(recipient, subjectin, bodyHtmlin, pdfBytes, "HotelConfirmation.pdf");
+                         }
+
+                         Response.Clear();
+                         Response.ContentType = "text/plain";
+                         Response.Cache.SetCacheability(HttpCacheability.NoCache);
+                         Response.Write("OK: Email sent");
+                         Response.Flush();
+                         Context.ApplicationInstance.CompleteRequest();
+                         return;
+                    }
 
 
+                  
 
-add this value first too in above logic in rdlc expression
-=First(Fields!HTCDSC.Value)
+                    //// SP returned false, so do nothing
+                    //Response.Clear();
+                    //Response.ContentType = "text/plain";
+                    //Response.Cache.SetCacheability(HttpCacheability.NoCache);
+                    //Response.Write("OK: No email sent");
+                    //Response.Flush();
+                    //Context.ApplicationInstance.CompleteRequest();
+                    //return;
+               }
+
+               // DOWNLOAD MODE
+               Response.Clear();
+               Response.Buffer = true;
+               Response.ContentType = "application/pdf";
+               Response.AddHeader("Content-Disposition", "attachment; filename=HotelConfirmation.pdf");
+               Response.Cache.SetCacheability(HttpCacheability.NoCache);
+               Response.BinaryWrite(pdfBytes);
+               Response.Flush();
+               Context.ApplicationInstance.CompleteRequest();
+          }
