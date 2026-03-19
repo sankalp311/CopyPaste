@@ -1,137 +1,58 @@
- private void ProcessRequest()
-          {
-               string emnno = QS("EMNNO");
-               string htnno = QS("HTNNO");
-               string runTimeStr = QS("RunTime");
 
-               string toEmail = QS("ToEmail");
-               if (string.IsNullOrWhiteSpace(toEmail)) toEmail = QS("Email");
+In this table rsreports
+we entering the USNNO and RMNNO (userid & reportID)
 
-               bool reportEmail = IsYes(QS("ReportEmail"));
+so it means that that RMNNO is NOT accessable for that user.
 
-               DateTime runTime;
-               bool hasRunTime = DateTime.TryParse(runTimeStr, out runTime);
+i have RMNNO Mapping for RDLC to Cerystal RMNNO it referenced from Reports table
 
-               DataSet ds = GetDataFromSp(
-                   emnno: emnno,
-                   htnno: htnno,
-                   runTime: hasRunTime ? (DateTime?)runTime : null
-               );
+SO you have to enter the rows in rs report for Crystal rmnno on behlf of RDLC RMNNO,
+Because i have to stop crystal report access for user where the same access for rdlc exists.
 
-               DataTable t0 = (ds.Tables.Count > 0) ? ds.Tables[0] : new DataTable(); // RoomList
-               DataTable t1 = (ds.Tables.Count > 1) ? ds.Tables[1] : new DataTable(); // ChangeLog
-               DataTable t2 = (ds.Tables.Count > 2) ? ds.Tables[2] : new DataTable(); // Accepted(Header)
-
-               t0.TableName = DS_ROOMLIST;
-               t1.TableName = DS_CHANGELOG;
-               t2.TableName = DS_HEADER;
-
-               string rdlcPath = Server.MapPath(REPORT_PATH);
-               if (string.IsNullOrWhiteSpace(rdlcPath) || !System.IO.File.Exists(rdlcPath))
-                    throw new Exception("RDLC file not found at: " + REPORT_PATH);
-
-               LocalReport report = new LocalReport { ReportPath = rdlcPath };
-               report.DataSources.Clear();
-
-               report.DataSources.Add(new ReportDataSource(DS_ROOMLIST, t0));
-               report.DataSources.Add(new ReportDataSource("HC", t0));
-               report.DataSources.Add(new ReportDataSource(DS_CHANGELOG, t1));
-               report.DataSources.Add(new ReportDataSource(DS_HEADER, t2));
-
-               string deviceInfo = @"<DeviceInfo>
-        <OutputFormat>PDF</OutputFormat>
-        <PageWidth>10in</PageWidth>
-        <MarginTop>0.25in</MarginTop>
-        <MarginLeft>0.25in</MarginLeft>
-        <MarginRight>0.25in</MarginRight>
-        <MarginBottom>0.25in</MarginBottom>
-    </DeviceInfo>";
-
-               string mimeType, encoding, extension;
-               Warning[] warnings;
-               string[] streams;
-
-               byte[] pdfBytes = report.Render(
-                   "PDF",
-                   deviceInfo,
-                   out mimeType,
-                   out encoding,
-                   out extension,
-                   out streams,
-                   out warnings
-               );
-
-               string subject = "Hotel Confirmation - Room List Accepted";
-               string bodyHtml = BuildEmailTemplateHtml();
-
-               SendEmailWithPdf(toEmail.Trim(), subject, bodyHtml, pdfBytes, "HotelConfirmation.pdf");
-
-               // EMAIL MODE
-               if (reportEmail)
-               {
-                    bool shouldSendEmail = false;
-
-                    if (hasRunTime)
-                         shouldSendEmail = ShouldSendHotelExportEmail(runTime);
-
-                    if (shouldSendEmail)
-                    {
-                         string email1 = ConfigurationManager.AppSettings["HotelExportEmail1"];
-                         string email2 = ConfigurationManager.AppSettings["HotelExportEmail2"];
-
-                         List<string> recipients = new List<string>();
-
-                         if (!string.IsNullOrWhiteSpace(email1))
-                              recipients.Add(email1.Trim());
-
-                         if (!string.IsNullOrWhiteSpace(email2))
-                              recipients.Add(email2.Trim());
-
-                         recipients = recipients
-                             .Where(x => !string.IsNullOrWhiteSpace(x))
-                             .Distinct(StringComparer.OrdinalIgnoreCase)
-                             .ToList();
-
-                         if (recipients.Count == 0)
-                              throw new Exception("SP returned true, but HotelExportEmail1 / HotelExportEmail2 not found in appSettings.");
-
-                         string subjectin = "Hotel Confirmation - Room List Accepted";
-                         string bodyHtmlin = BuildEmailTemplateHtml();
-
-                         foreach (string recipient in recipients)
-                         {
-                              SendEmailWithPdf(recipient, subjectin, bodyHtmlin, pdfBytes, "HotelConfirmation.pdf");
-                         }
-
-                         Response.Clear();
-                         Response.ContentType = "text/plain";
-                         Response.Cache.SetCacheability(HttpCacheability.NoCache);
-                         Response.Write("OK: Email sent");
-                         Response.Flush();
-                         Context.ApplicationInstance.CompleteRequest();
-                         return;
-                    }
+records in rsreports table means user dont have access for this reportid(RMNNO)
 
 
-                  
-
-                    //// SP returned false, so do nothing
-                    //Response.Clear();
-                    //Response.ContentType = "text/plain";
-                    //Response.Cache.SetCacheability(HttpCacheability.NoCache);
-                    //Response.Write("OK: No email sent");
-                    //Response.Flush();
-                    //Context.ApplicationInstance.CompleteRequest();
-                    //return;
-               }
-
-               // DOWNLOAD MODE
-               Response.Clear();
-               Response.Buffer = true;
-               Response.ContentType = "application/pdf";
-               Response.AddHeader("Content-Disposition", "attachment; filename=HotelConfirmation.pdf");
-               Response.Cache.SetCacheability(HttpCacheability.NoCache);
-               Response.BinaryWrite(pdfBytes);
-               Response.Flush();
-               Context.ApplicationInstance.CompleteRequest();
-          }
+RDLC RMNNO	CRYSTAL RMNNO
+908	         855
+877	         859
+868	         501
+899	         107
+898	         515
+880	         113
+903	         517
+887	         724
+878	         475
+894	         787
+879	         813
+884	         842
+885	         845
+869	         856
+870	         769
+907	         777
+897	         861
+891	         815
+906	         830
+895	         810
+892	         860
+871	         774
+886	         863
+872	         786
+882	         775
+881	         771
+867	         827
+865	         805
+866	         828
+890	         812
+896	         829
+873	         858
+902	         767
+901	         802
+905	         848
+900	         849
+874	         839
+888	         783
+875	         776
+889	         806
+904	         756
+893	         770
+876	         835
