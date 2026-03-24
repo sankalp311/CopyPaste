@@ -1,58 +1,389 @@
 
-In this table rsreports
-we entering the USNNO and RMNNO (userid & reportID)
 
-so it means that that RMNNO is NOT accessable for that user.
-
-i have RMNNO Mapping for RDLC to Cerystal RMNNO it referenced from Reports table
-
-SO you have to enter the rows in rs report for Crystal rmnno on behlf of RDLC RMNNO,
-Because i have to stop crystal report access for user where the same access for rdlc exists.
-
-records in rsreports table means user dont have access for this reportid(RMNNO)
+Last
+=IIf(Trim(CStr(Fields!RGCPLNM.Value & "")) = "", "  ", Fields!RGCPLNM.Value)
 
 
-RDLC RMNNO	CRYSTAL RMNNO
-908	         855
-877	         859
-868	         501
-899	         107
-898	         515
-880	         113
-903	         517
-887	         724
-878	         475
-894	         787
-879	         813
-884	         842
-885	         845
-869	         856
-870	         769
-907	         777
-897	         861
-891	         815
-906	         830
-895	         810
-892	         860
-871	         774
-886	         863
-872	         786
-882	         775
-881	         771
-867	         827
-865	         805
-866	         828
-890	         812
-896	         829
-873	         858
-902	         767
-901	         802
-905	         848
-900	         849
-874	         839
-888	         783
-875	         776
-889	         806
-904	         756
-893	         770
-876	         835
+First
+=IIf(Trim(CStr(Fields!RGCPFNM.Value & "")) = "", "  ", Fields!RGCPFNM.Value)
+
+Organization
+=IIf(Trim(CStr(Fields!RGCPORG.Value & "")) = "", "  ", Fields!RGCPORG.Value)
+
+
+Address1
+=IIf(Trim(CStr(Fields!RGCPAD1.Value & "")) = "", "  ", Fields!RGCPAD1.Value)
+
+
+Address2
+=IIf(Trim(CStr(Fields!RGCPAD2.Value & "")) = "", "  ", Fields!RGCPAD2.Value)
+
+City
+=IIf(Trim(CStr(Fields!RGCPCITY.Value & "")) = "", "  ", Fields!RGCPCITY.Value)
+
+State
+=IIf(Trim(CStr(Fields!RGCPST.Value & "")) = "", "  ", Fields!RGCPST.Value)
+
+
+Zip
+=IIf(Trim(CStr(Fields!RGCPZIP.Value & "")) = "", "  ", Fields!RGCPZIP.Value)
+
+Country
+=IIf(Trim(CStr(Fields!RGCPCTRY.Value & "")) = "", "  ", Fields!RGCPCTRY.Value)
+
+Tel
+=IIf(Trim(CStr(Fields!RGCPTEL.Value & "")) = "", "  ", Fields!RGCPTEL.Value)
+
+Fax
+=IIf(Trim(CStr(Fields!RGCPFAX.Value & "")) = "", "  ", Fields!RGCPFAX.Value)
+
+Email
+=IIf(Trim(CStr(Fields!RGCEMAIL.Value & "")) = "", "  ", Fields!RGCEMAIL.Value)
+
+
+HotelName
+=Fields!HTCDSC.Value
+
+
+HotelAddress
+=IIf(Trim(CStr(Fields!HTCAD1.Value & "")) = "", "  ", Fields!HTCAD1.Value)
+
+
+HotelCity
+=IIf(Trim(CStr(Fields!HTCCITY.Value & "")) = "", "  ", Fields!HTCCITY.Value)
+
+HotelState
+=IIf(Trim(CStr(Fields!HTCST.Value & "")) = "", "  ", Fields!HTCST.Value)
+
+Hoteltel
+=IIf(Trim(CStr(Fields!HTCTEL.Value & "")) = "", "  ", Fields!HTCTEL.Value)
+
+
+Roomtype
+=Fields!RTCDESC.Value
+
+RoomCategoryAcro
+=Fields!RCCACRO.Value
+
+ArriveDate
+=Fields!RSDTARR.Value
+
+DapartDate
+=Fields!RSDTDEP.Value
+
+
+CCType
+=IIf(Trim(CStr(Fields!RSCCCTYPE.Value & "")) = "", "  ", Fields!RSCCCTYPE.Value)
+
+CCGtd
+=IIf(
+    IsNothing(Fields!RSCCCNO.Value) OrElse Trim(CStr(Fields!RSCCCNO.Value & "")) = "",
+    "  ",
+    "************" & Right(CStr(Fields!RSCCCNO.Value & ""), 4)
+)
+
+CCExp
+=IIf(Trim(CStr(Fields!RSCCCEXP.Value & "")) = "", "  ", Fields!RSCCCEXP.Value)
+
+
+CC_Name
+leave blank for now
+
+CC_CVV
+leave blank for now
+
+RoomDeposit
+leave blank for now
+
+Requests
+=IIf(
+    IsNothing(Fields!RSCHOTELCOMMENTS.Value) OrElse Fields!RSCHOTELCOMMENTS.Value = "",
+    (IIf(IsNothing(Fields!RSCPERSONCOMMENTS.Value), "", Fields!RSCPERSONCOMMENTS.Value) & " " &
+     IIf(IsNothing(Fields!RSCREQUESTSTRING.Value), "", Fields!RSCREQUESTSTRING.Value)),
+    (IIf(IsNothing(Fields!RSCHOTELCOMMENTS.Value), "", Fields!RSCHOTELCOMMENTS.Value) & " " &
+     IIf(IsNothing(Fields!RSCPERSONCOMMENTS.Value), "", Fields!RSCPERSONCOMMENTS.Value) & " " &
+     IIf(IsNothing(Fields!RSCREQUESTSTRING.Value), "", Fields!RSCREQUESTSTRING.Value))
+)
+
+
+RefCode
+=IIf(Trim(CStr(Fields!RGCNO.Value & "")) = "", "  ", Fields!RGCNO.Value)
+
+RoomRate
+leave blank for now
+
+NbrNights
+=DateDiff(
+    "d", 
+    Fields!RSDTARR.Value,  
+    Fields!RSDTDEP.Value    
+)
+
+
+Room#
+=IIf(Trim(CStr(Fields!RSCROOMNO.Value & "")) = "", "  ", Fields!RSCROOMNO.Value)
+
+
+Hotel Conf#
+=IIf(Trim(CStr(Fields!RSCCONFNO.Value & "")) = "", "  ", Fields!RSCCONFNO.Value)
+
+
+Block Code
+leave blank for now
+
+
+ShareName
+=Trim(
+    IIf(Not IsNothing(Fields!RMCFNM_1.Value), Fields!RMCFNM_1.Value, "") & " " & 
+    IIf(Not IsNothing(Fields!RMCLNM_1.Value), Fields!RMCLNM_1.Value, "") & " " & 
+    IIf(Not IsNothing(Fields!RMCFNM_2.Value), Fields!RMCFNM_2.Value, "") & " " & 
+    IIf(Not IsNothing(Fields!RMCLNM_2.Value), Fields!RMCLNM_2.Value, "") & " " & 
+    IIf(Not IsNothing(Fields!RMCFNM_3.Value), Fields!RMCFNM_3.Value, "") & " " & 
+    IIf(Not IsNothing(Fields!RMCLNM_3.Value), Fields!RMCLNM_3.Value, "")
+)
+
+
+
+
+
+
+select * from REPORTS  where rmnno =878
+order by 1 desc
+
+
+SELECT * from REPORT_SP_MAP where RMNNO=878
+
+
+
+--sp_helptext sp_ICM_RPT_LEAD_SHAREWITH_CROSS_RDLC_4CC
+
+
+      
+CREATE PROCEDURE [sp_ICM_RPT_LEAD_SHAREWITH_CROSS_RDLC_4CC]          
+    @EMNNO INT,          
+    @CMNNO INT=null,          
+    @HTNNO INT=null,          
+    @From DATETIME,          
+    @To DATETIME          
+AS        
+BEGIN        
+    SET NOCOUNT ON;          
+    SET ANSI_WARNINGS OFF;          
+    SET TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;          
+        
+         
+        
+    INSERT INTO ParamValues (ParamName, ParamValue)        
+    VALUES        
+        ('EMNNO', CAST(@EMNNO AS VARCHAR(50))),        
+        ('CMNNO', CAST(@CMNNO AS VARCHAR(50))),        
+        ('HTNNO', CAST(@HTNNO AS VARCHAR(50))),        
+        ('RGDTADD_FROM', CONVERT(VARCHAR(30), @From, 120)),        
+        ('RGDTADD_TO', CONVERT(VARCHAR(30), @To, 120));        
+        
+        
+    DECLARE @EncryptKey VARCHAR(500) = 'ILME5fgPicoqFOik+8amMQ==';          
+        
+    -- Single SELECT with conditional filters        
+    SELECT          
+        'LEAD' AS TYPE,        
+        REGMST.RGCPLNM AS LEAD_LAST,        
+        REGMST.RGCPFNM AS LEAD_FIRST,        
+        REGMST.RGCPLNM,        
+        REGMST.RGCPFNM,        
+        REGMST.RGCPMI,        
+        REGMST.RGCNIKNM,        
+        REGMST.RGNNO,        
+        REGMST.RGCPORG,        
+        REGMST.RGCPTLE,        
+        REGMST.RGDTADD,        
+        REGMST.RGCPPFX,        
+        REGMST.RGCPSFX,        
+        REGMST.RGDTADD,        
+        REGMST.RGDTREC,        
+        REGMST.RGCSTAT,        
+        REGMST.RGCGENDER,        
+        REGMST.RGCPPNAME,        
+        REGMST.RGCPPNO,        
+        REGMST.RGCCITIZEN,        
+        REGMST.RGCPPISSUED,        
+        REGMST.RGCPPEXP,        
+        REGMST.RGCISSUEDBY,        
+        REGMST.RGCNATLITY,        
+        REGMST.RGCDOB,        
+        REGMST.RGNAGE,        
+        REGMST.RGCHANDI,        
+        REGMST.RGCEMERTEL,        
+        REGMST.RGCEMERTEL_ALT,        
+        REGMST.RGCEMERCTC,        
+        REGMST.RGCDIET,        
+        REGMST.RGCPAD1,        
+        REGMST.RGCPAD2,        
+        REGMST.RGCPCITY,        
+        REGMST.RGCPST,        
+        REGMST.RGCPZIP,        
+        REGMST.RGCPCTRY,        
+        REGMST.RGCPREGN,        
+        REGMST.RGCNO,        
+        REGMST.RGCPTEL,        
+        REGMST.RGCPFAX,        
+        REGMST.RGCEMAIL,        
+        
+        ACTMST.ACNEXTAMT,        
+        ACTMST.ACNDSBAMT,        
+        
+        CATEGORY.CMNNO,        
+        CATEGORY.CMCDSC,        
+        CATEGORY.CMCTYPE,        
+        CATEGORY.CMCBDGTYPE,        
+        CATEGORY.CMCBDGTLE,        
+        
+        REGUSER.RUNNO,        
+        REGUSER.RUCUSRA,        
+        REGUSER.RUCUSRB,        
+        REGUSER.RUCUSRC,        
+        REGUSER.RUCUSRD,        
+        REGUSER.RUCUSRE,        
+        REGUSER.RUCUSRF,        
+        REGUSER.RUCUSRG,        
+        REGUSER.RUCUSRH,        
+        REGUSER.RUCUSRI,        
+        REGUSER.RUCUSRJ,        
+        REGUSER.RUCUSRK,        
+        REGUSER.RUCUSRL,        
+        REGUSER.RUCUSRM,        
+        REGUSER.RUCUSRN,        
+        REGUSER.RUCUSRO,        
+        REGUSER.RUCUSRP,        
+        REGUSER.RUCUSRQ,        
+        REGUSER.RUCUSRR,        
+        REGUSER.RUCUSRS,        
+        REGUSER.RUCUSRT,        
+        REGUSER.RUCPMUSRA,        
+        REGUSER.RUCPMUSRB,        
+        REGUSER.RUCPMUSRC,        
+        REGUSER.RUCPMUSRD,        
+        REGUSER.RUCPMUSRE,        
+        REGUSER.RUCURL,        
+        REGUSER.RUCSRCCODE,        
+        REGUSER.EMNNO,        
+        REGUSER.CMNNO,        
+        REGUSER.RUNCATDISCOUNT,        
+        REGUSER.RUCERROR_TRACE,        
+        REGUSER.RUCCCEMAIL,        
+        REGUSER.RUCAFFILIATE_ID_2,        
+        REGUSER.RUCUSRU,        
+        REGUSER.RUCUSRV,        
+        REGUSER.RUCUSRW,        
+        REGUSER.RUCUSRX,        
+        REGUSER.RUCUSRY,        
+        REGUSER.RUCUSRZ,        
+        REGUSER.RUCUSRAA,        
+        REGUSER.RUCUSRBB,        
+        REGUSER.RUCUSRCC,        
+        REGUSER.RUCUSRDD,        
+     REGUSER.RUCUSREE,        
+        REGUSER.RUCUSRFF,        
+        REGUSER.RUCUSRGG,        
+        REGUSER.RUCUSRHH,        
+        REGUSER.RUCUSRII,        
+        REGUSER.RUCUSRJJ,        
+        REGUSER.RUCUSRKK,        
+      REGUSER.RUCUSRLL,        
+        REGUSER.RUCUSRMM,        
+        REGUSER.RUCUSRNN,        
+        REGUSER.RUCUSROO,        
+        REGUSER.RUCUSRPP,        
+        REGUSER.RUCUSRQQ,        
+        REGUSER.RUCUSRRR,        
+        REGUSER.RUCUSRSS,        
+        REGUSER.RUCUSRTT,        
+        REGUSER.RUCUSRUU,        
+        REGUSER.RUCUSRVV,        
+        REGUSER.RUCOWNER,        
+        REGUSER.RUCREPRESENTING,        
+        REGUSER.RUCXIDNO1,        
+        REGUSER.RUNGROUPMAX,        
+        REGUSER.RUCRMMATELIST,        
+        REGUSER.RUCXIDNO2,        
+        
+        AFFILIATE2.AF2CIDNBR,        
+        AFFILIATE2.AF2CNAME,        
+        
+        EVENTS.EMNNO,        
+        EVENTS.EMCNM,        
+        
+        HOTEL.HTNNO,        
+        HOTEL.HTCDSC,        
+        HOTEL.HTNTAXINC,        
+        HOTEL.HTCACRO,        
+        HOTEL.HTCAD1,        
+        HOTEL.HTCAD2,        
+        HOTEL.HTCCITY,        
+        HOTEL.HTCST,        
+        HOTEL.HTCZIP,        
+        HOTEL.HTCREGN,        
+        HOTEL.HTCCNTRY,        
+        HOTEL.HTCTEL,        
+        HOTEL.HTCFAX,        
+        HOTEL.HTCEMAIL,        
+        
+        HOTELROOMBLOCKS.HBNNO,        
+        HOTELROOMBLOCKS.HBCACRO,        
+        HOTELROOMBLOCKS.HBCNO,        
+        
+        ROOMCATEGORIES.RCCDESC,        
+        ROOMCATEGORIES.RCCACRO,        
+        
+        ROOMTYPES.RTCDESC,        
+        
+        RES.RSNNO,        
+        RES.RSDTARR,        
+        RES.RSDTDEP,        
+        RES.RSCREQUESTSTRING,        
+        RES.RSCCCTYPE,        
+        RES.RSCPERSONCOMMENTS,        
+        RES.RSCHOTELCOMMENTS,        
+        -- dbo.udf_blowfishdecrypt(RES.RSCCCNO, @EncryptKey) AS RSCCCNO,       
+  master.dbo.udf_blowfishdecrypt(RES.RSCCCNO, 'ILME5fgPicoqFOik+8amMQ==') AS RSCCCNO,      
+        master.dbo.udf_blowfishdecrypt(RES.RSCCCEXP, @EncryptKey) AS RSCCCEXP,        
+        RES.RSDTXLD,        
+        RES.RSNRMTOTAL,        
+        RES.RSNMASTERACCOUNT,        
+        RES.RSNRMDEPOSIT,        
+        RES.RSCCONFNO,        
+        RES.RSCROOMNO,        
+        RES.RSNMSTACCT,        
+        RES.RSDTBOOKINGMADE,        
+        RES.RSCSPECIALREQ,        
+        RES.RSCCCNAME,        
+        RES.RSDTMDY,        
+        
+        RESNIGHTS.RNMPERNIGHTCHARGE,        
+        
+        MATES.*,      
+  RES.RSCCCNO      
+    FROM EVENTS        
+    INNER JOIN REGMST WITH (NOLOCK) ON EVENTS.EMNNO = REGMST.EMNNO        
+    LEFT OUTER JOIN REGUSER WITH (NOLOCK) ON REGMST.RGNNO = REGUSER.RGNNO        
+    INNER JOIN CATEGORY ON REGMST.CMNNO = CATEGORY.CMNNO        
+    INNER JOIN RESERVATIONS RES WITH (NOLOCK) ON REGMST.RGNNO = RES.RGNNO        
+    LEFT OUTER JOIN ACTMST WITH (NOLOCK) ON RES.RSNNO = ACTMST.RSNNO        
+    LEFT OUTER JOIN HOTELROOMBLOCKS ON RES.HBNNO = HOTELROOMBLOCKS.HBNNO        
+    LEFT OUTER JOIN RESNIGHTS ON RES.RSNNO = RESNIGHTS.RSNNO        
+    INNER JOIN HOTEL ON RES.HTNNO = HOTEL.HTNNO        
+    INNER JOIN ROOMCATEGORIES ON RES.RCNNO = ROOMCATEGORIES.RCNNO        
+    INNER JOIN ROOMTYPES ON RES.RTNNO = ROOMTYPES.RTNNO        
+    LEFT OUTER JOIN AFFILIATE2 ON REGUSER.RUCREPRESENTING = AFFILIATE2.AF2CNO        
+    CROSS APPLY dbo.fn_GetResMates(RES.RSNNO) AS MATES        
+    WHERE EVENTS.EMNNO = @EMNNO        
+      AND (CATEGORY.CMNNO = @CMNNO OR @CMNNO IS NULL)        
+      AND (HOTEL.HTNNO = @HTNNO OR @HTNNO IS NULL)        
+      AND RES.RSDTBOOKINGMADE BETWEEN @From AND @To        
+   AND RES.RSDTXLD iS  NULL        
+    ORDER BY EVENTS.EMNNO, RGCPLNM, RGCPFNM        
+END 
+
+
+gpt you need to retuen column name and vakues like above format.
+And below is the rdlc expression and you need to handle in sp and retun only mentioned column above 
