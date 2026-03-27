@@ -1,201 +1,81 @@
-async function SaveAco(rgnno) {
-    debugger;
-    //Mastercard credit card validation regex
-    //   /^5[1 - 5][0 - 9]{ 14 } $ |^ 2(?: 2(?: 2[1 - 9] | [3 - 9][0 - 9]) | [3 - 6][0 - 9][0 - 9] | 7(?: [01][0 - 9] | 20))[0 - 9]{ 12 } $ /
-
-    //American Express credit card validation regex
-    //   /^ 3[47][0 - 9]{ 13 } $ /
-
-    //Visa credit card validation regex
-    //   /^ 4[0 - 9]{ 12 } (?: [0 - 9]{ 3 })?$ /
-
-    //Discover credit card validation regex
-    //  /^ 65[4 - 9][0 - 9]{ 13 }| 64[4 - 9][0 - 9]{ 13 }| 6011[0 - 9]{ 12 }| (622(?: 12[6 - 9]
-    //    | 1[3 - 9][0 - 9] | [2 - 8][0 - 9][0 - 9] | 9[01][0 - 9] | 92[0 - 5])[0 - 9]{ 10 }) $ /
-
-    //Maestro credit card validation regex
-    //   /^ (5018 | 5081 | 5044 | 5020 | 5038 | 603845 | 6304 | 6759 | 676[1 - 3] | 6799 | 6220 | 504834 | 504817 | 504645)[0 - 9]{ 8, 15 } $ /
-
-    //JCB credit card validation regex
-    //   /^ (?: 2131 | 1800 | 35[0 - 9]{ 3 })[0 - 9]{ 11 } $ /
-
-    //Diner’s Club credit card validation regex
-    //   /^ 3(?: 0[0 - 5] | [68][0 - 9])[0 - 9]{ 11 } $ /
-    //  
-
-    var Htnno = parseInt($("#RGN_ACO_HTNNO").find("option:selected").val());
-
-    var CCTp = $("#RGC_ACO_CCTYPE").find("option:selected").val();
-
-    /* $("#ccnum").val($('#RGC_ACO_CC').val());*/
-    //var CcNum = $("#ccnum").val();
-    //var vis = CcNum.slice(-4),
-    //    countNum = '';
-    //for (var i= (CcNum.length) - 4; i > 0; i--) {
-    //    countNum += '*';
-    //}
-    var CcNum = "";
-
-
-    //if ($('#RGC_ACO_CC').val() == "") {
-    //    //  CcNum = $("#ccnum").val();
-    //    $("#CCErrorMsg6").removeAttr('hidden');
-    //    $("#CCErrorMsg6").show();
-    //    setTimeout(function () { $("#CCErrorMsg6").hide(); }, 3000)
-    //} else {
-    //    CcNum = $("#RGC_ACO_CC").val();
-    //}
-
-    $('#hid_token').val('');
-    var _token = $('#RSCCCNOTemp').val();
-    if (_token == "") {
-        _token = $('#RSCCCNOTempRes').val();
-    }
+    
+CREATE Proc [dbo].[usp_icm_Update_RegistrationAcoDtl]                        
+                      
+-- =============================================                                  
+-- Author: SANKALP                                 
+-- Create date: 14/12/2022                                  
+-- Description:  Update Aco Registration details                                  
+-- =============================================                       
+                          
+@RGNNO int ,                
+@RGN_ACO_HTNNO int=null,                
+@RGN_ACO_ROOMS int=null,                
+@RGD_ACO_ARR varchar(max)=null,                
+@RGD_ACO_DEP varchar(max)=null,                
+@RGC_ACO_BLOCKCODE varchar(max)=null,                
+@RGC_ACO_STATUS varchar(max)=null,                
+@RGC_ACO_ADD_REQUEST  varchar(max)=null,                
+@RGC_ACO_AGENT_NOTES  varchar(max)=null,                
+@RGC_ACO_SPCL_REQUESTS  varchar(max)=null,                
+@RGC_ACO_CCTYPE  varchar(max)=null,                
+@RGC_ACO_CC  varchar(max)=null,                
+@RGC_ACO_CCEXP  varchar(max)=null,                
+@RGC_ACO_CCNAME  varchar(max)=null,                
+@RGD_ACO_CREATE_TIME  varchar(max)=null,        
+@RGC_ACO_CCCVV varchar(200) = null ,
+@USNNO int
+as        
+begin try        
+BEGIN                  
+         
+  IF CHARINDEX('*', @RGC_ACO_CC) > 0        
+BEGIN         
+ --update REGMST set RGC_ACO_CC = @oldRGC_ACO_CC where RGNNO=@RGNNO        
+ set @RGC_ACO_CC =(select isnull(master.dbo.Udf_blowfishdecrypt(RGC_ACO_CC, 'ILME5fgPicoqFOik+8amMQ=='),'') from REGMST where RGNNO=@RGNNO);          
+END         
+ IF (@RGC_ACO_CCCVV='***' or @RGC_ACO_CCCVV='****')        
+BEGIN        
+ --update REGMST set RGC_ACO_CCCVV = @OldRGC_ACO_CCCVV where RGNNO= @RGNNO        
+ set @RGC_ACO_CCCVV =(select isnull(master.dbo.Udf_blowfishdecrypt(RGC_ACO_CCCVV, 'ILME5fgPicoqFOik+8amMQ=='),'') from REGMST where RGNNO=@RGNNO);          
+END         
+        
+        
+---declare @oldRGC_ACO_CC varchar(200),@OldRGC_ACO_CCCVV varchar(200)        
+        
+--set @oldRGC_ACO_CC = (select isnull(RGC_ACO_CC,'') from REGMST where RGNNO=@RGNNO);        
+--set @OldRGC_ACO_CCCVV = (select isnull(master.dbo.Udf_blowfishdecrypt(RGC_ACO_CCCVV, 'ILME5fgPicoqFOik+8amMQ=='),'') from REGMST where RGNNO=@RGNNO);         
+        
+Update REGMST                 
+SET                 
+RGD_ACO_ARR = cast(@RGD_ACO_ARR as datetime),                
+RGD_ACO_DEP = cast(@RGD_ACO_DEP as datetime),                
+RGN_ACO_ROOMS = @RGN_ACO_ROOMS,                
+RGC_ACO_BLOCKCODE = @RGC_ACO_BLOCKCODE,                
+RGC_ACO_STATUS = @RGC_ACO_STATUS,                
+RGC_ACO_ADD_REQUEST = @RGC_ACO_ADD_REQUEST,                
+RGC_ACO_AGENT_NOTES = @RGC_ACO_AGENT_NOTES,                
+RGC_ACO_SPCL_REQUESTS = @RGC_ACO_SPCL_REQUESTS,                
+RGC_ACO_CCTYPE = @RGC_ACO_CCTYPE,                
+RGC_ACO_CC = master.dbo.udf_blowfishencrypt(@RGC_ACO_CC, 'ILME5fgPicoqFOik+8amMQ=='),       ---@RGC_ACO_CC,                
+RGC_ACO_CCEXP = master.dbo.udf_blowfishencrypt(@RGC_ACO_CCEXP, 'ILME5fgPicoqFOik+8amMQ=='), ---@RGC_ACO_CCEXP,                
+RGC_ACO_CCNAME = @RGC_ACO_CCNAME,                
+RGD_ACO_CREATE_TIME = GETDATE(),                
+RGN_ACO_HTNNO = @RGN_ACO_HTNNO,        
+RGC_ACO_CCCVV =master.dbo.udf_blowfishencrypt(@RGC_ACO_CCCVV, 'ILME5fgPicoqFOik+8amMQ==')        
+WHERE RGNNO = @RGNNO;                
+          
+        
+select RGD_ACO_CREATE_TIME as Result from REGMST WHERE RGNNO = @RGNNO;;                
+                
+END        
+end try                             
+  BEGIN CATCH                                    
+ INSERT INTO dbo.dbErrorLogs (UserName, ErrorNumber, ErrorState, ErrorSeverity, ErrorLine,                                  
+ ErrorProcedure, ErrorMessage, ErrorOccuredOn)                                    
+ VALUES (SUSER_SNAME(), ERROR_NUMBER(), ERROR_STATE(), ERROR_SEVERITY(), ERROR_LINE(),                                  
+ ERROR_PROCEDURE(), ERROR_MESSAGE(), GETDATE())                               
+ select 0  as Result                              
+  END CATCH     
   
-    if ($('#hid_IsEdit').val() == 0) {
-        $('#hid_token').val(_token);
-    }
-    else {
-        if (_token.indexOf('tok_') > -1) {
-            if (!window.vgsForm.state.card_number.isEmpty) {
-                const result = await submitVGSForm();
-                $('#hid_token').val(result.token);              
-            }
-            else {
-                $("#CCErrorMsg6").removeAttr('hidden');
-                $("#CCErrorMsg6").show();
-                setTimeout(function () { $("#CCErrorMsg6").hide(); }, 3000)
-            }
-        }
-        else {
-            const token = await bt.tokens.create({
-                type: 'card',
-                data: {
-                    number: window.cardNumberElement,
-                    cvc: window.cvcElement
-                },
-                mask: {
-                    number: '{{ data.number | reveal_last: 4 }}',
-                    expiration_month: '{{ data.expiration_month }}',
-                    expiration_year: '{{ data.expiration_year }}',
-                },
-            });
-
-            if (token && token.id) {
-                $('#hid_token').val(token.id);               
-            }
-        }
-    }
-    var CcNum = $("#hid_token").val();
-
-    if ($("#RGC_ACO_STATUS").find("option:selected").val() == "") {
-        $('#RequestAcoErrMsg').css('display', 'block');
-        setTimeout(function () { $('#RequestAcoErrMsg').css('display', 'none'); }, 2000)
-    } else if ($("#RGC_ACO_ADD_REQUEST").find("option:selected").val() == "") {
-        $('#AddRequestAcoErrMsg').css('display', 'block');
-        setTimeout(function () { $('#AddRequestAcoErrMsg').css('display', 'none'); }, 2000)
-    } else
-        if (CCTp == "") {
-            $("#CCErrorMsg1").removeAttr('hidden');
-            $("#CCErrorMsg1").show();
-            setTimeout(function () { $("#CCErrorMsg1").hide(); }, 3000)
-            window.scrollTo({ left: 0, top: document.body.scrollHeight, behavior: "smooth" });
-        } else if (CcNum == "") {
-            $("#CCErrorMsg6").removeAttr('hidden');
-            $("#CCErrorMsg6").show();
-            setTimeout(function () { $("#CCErrorMsg6").hide(); }, 3000)
-            window.scrollTo({ left: 0, top: document.body.scrollHeight, behavior: "smooth" });
-        } else if ($("#RGC_ACO_CCEXP").val() == "") {
-            $("#CCErrorMsg4").removeAttr('hidden');
-            $("#CCErrorMsg4").show();
-            setTimeout(function () { $("#CCErrorMsg4").hide(); }, 3000)
-            window.scrollTo({ left: 0, top: document.body.scrollHeight, behavior: "smooth" });
-        } else if ($("#RGC_ACO_CCNAME").val() == "") {
-            $("#CCErrorMsg5").removeAttr('hidden');
-            $("#CCErrorMsg5").show();
-            setTimeout(function () { $("#CCErrorMsg5").hide(); }, 3000)
-            window.scrollTo({ left: 0, top: document.body.scrollHeight, behavior: "smooth" });
-        }
-        //else if ($("#RGC_ACO_CCCVV").val() == "") {
-        //    $("#RegACO_CCCVVError").removeAttr('hidden');
-        //    $("#RegACO_CCCVVError").show();
-        //    setTimeout(function () { $("#RegACO_CCCVVError").hide(); }, 3000)
-        //    window.scrollTo({ left: 0, top: document.body.scrollHeight, behavior: "smooth" });
-        //}
-        else {
-            //if (validateCC(CCTp, CcNum) == true) {
-
-                //American Express            fa fa - cc - amex
-                //Discover                           fa fa - cc - discover
-                //Visa                                       fa fa - cc - visa
-                //Mastercard                           fa fa - cc - mastercard
-                //Other                                   fa fa - credit - card
-
-                //- done
-                //
-                //
-                //ER
-                //
-                //
-                //VI - done
-                // $('#RGC_ACO_CC').val(function (_, val) {
-                // return val.replace(/\d{12}(\d{4})/, "************$1");
-                // });
-                var SlahExp = $("#RGC_ACO_CCEXP").val();
-                var Exp = SlahExp.replace("/", "");
-
-                var data = {
-                    RGNNO: rgnno,
-                    RGD_ACO_ARR: $("#RGD_ACO_ARR").val(),
-                    RGD_ACO_DEP: $("#RGD_ACO_DEP").val(),
-                    RGN_ACO_ROOMS: $("#RGN_ACO_ROOMS").val(),
-                    RGC_ACO_BLOCKCODE: $("#RGC_ACO_BLOCKCODE").val(),
-                    RGC_ACO_STATUS: $("#RGC_ACO_STATUS").find("option:selected").val(),
-                    RGC_ACO_ADD_REQUEST: $("#RGC_ACO_ADD_REQUEST").find("option:selected").val(),
-                    RGC_ACO_AGENT_NOTES: $("#RGC_ACO_AGENT_NOTES").val(),
-                    RGC_ACO_SPCL_REQUESTS: $("#RGC_ACO_SPCL_REQUESTS").val(),
-                    RGC_ACO_CCTYPE: $("#RGC_ACO_CCTYPE").find("option:selected").val(),
-                    RGC_ACO_CC: CcNum,
-                    RGC_ACO_CCEXP: Exp,
-                    RGC_ACO_CCNAME: $("#RGC_ACO_CCNAME").val(),
-                    RGD_ACO_CREATE_TIME: $("#RGD_ACO_CREATE_TIME").val(),
-                    RGN_ACO_HTNNO: Htnno,
-                    RGC_ACO_CCCVV: $("#RGC_ACO_CCCVV").val()
-                }
-
-                $.ajax({
-                    //SaveAcoDtl
-                    url: '/Registration/SaveAcoDtl',
-                    type: 'Post',
-                    data: data,
-                    contentType: "application/x-www-form-urlencoded; charset=UTF-8",
-                    /*contentType: "application/json",*/
-                    // dataType: 'json',
-                    async: false,
-                    success: function (response) {
-                        debugger;
-                        $("#RGD_ACO_CREATE_TIME").text(response);
-                        // $('#RGC_ACO_CC').val(function (_, val) {
-                        // return val.replace(/\d{12}(\d{4})/, "************$1");
-                        // });
-                        //var Cc = $("#RGC_ACO_CC").toString().val();
-                        //  Cc.replace(/.(?=.{4})/g, 'x');
-                        //Swal.fire({
-                        //    title: 'Saved',
-                        //    text: 'Aco Details Saved Successfully!',
-                        //    icon: 'success',
-                        //    showCancelButton: false,
-                        //    confirmButtonColor: '#3085d6',
-                        //    cancelButtonColor: '#aaa',
-                        //    confirmButtonText: 'Ok'
-                        //})
-                        globalMessage(1, 'S', '');
-                        setTimeout(function () {
-
-                            location.reload();
-                        }, 1500);
-                    }
-                })
-           // }
-        }
-}
+  
+  
