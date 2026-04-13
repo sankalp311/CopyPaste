@@ -1,81 +1,57 @@
-    
-CREATE Proc [dbo].[usp_icm_Update_RegistrationAcoDtl]                        
-                      
--- =============================================                                  
--- Author: SANKALP                                 
--- Create date: 14/12/2022                                  
--- Description:  Update Aco Registration details                                  
--- =============================================                       
-                          
-@RGNNO int ,                
-@RGN_ACO_HTNNO int=null,                
-@RGN_ACO_ROOMS int=null,                
-@RGD_ACO_ARR varchar(max)=null,                
-@RGD_ACO_DEP varchar(max)=null,                
-@RGC_ACO_BLOCKCODE varchar(max)=null,                
-@RGC_ACO_STATUS varchar(max)=null,                
-@RGC_ACO_ADD_REQUEST  varchar(max)=null,                
-@RGC_ACO_AGENT_NOTES  varchar(max)=null,                
-@RGC_ACO_SPCL_REQUESTS  varchar(max)=null,                
-@RGC_ACO_CCTYPE  varchar(max)=null,                
-@RGC_ACO_CC  varchar(max)=null,                
-@RGC_ACO_CCEXP  varchar(max)=null,                
-@RGC_ACO_CCNAME  varchar(max)=null,                
-@RGD_ACO_CREATE_TIME  varchar(max)=null,        
-@RGC_ACO_CCCVV varchar(200) = null ,
-@USNNO int
-as        
-begin try        
-BEGIN                  
-         
-  IF CHARINDEX('*', @RGC_ACO_CC) > 0        
-BEGIN         
- --update REGMST set RGC_ACO_CC = @oldRGC_ACO_CC where RGNNO=@RGNNO        
- set @RGC_ACO_CC =(select isnull(master.dbo.Udf_blowfishdecrypt(RGC_ACO_CC, 'ILME5fgPicoqFOik+8amMQ=='),'') from REGMST where RGNNO=@RGNNO);          
-END         
- IF (@RGC_ACO_CCCVV='***' or @RGC_ACO_CCCVV='****')        
-BEGIN        
- --update REGMST set RGC_ACO_CCCVV = @OldRGC_ACO_CCCVV where RGNNO= @RGNNO        
- set @RGC_ACO_CCCVV =(select isnull(master.dbo.Udf_blowfishdecrypt(RGC_ACO_CCCVV, 'ILME5fgPicoqFOik+8amMQ=='),'') from REGMST where RGNNO=@RGNNO);          
-END         
-        
-        
----declare @oldRGC_ACO_CC varchar(200),@OldRGC_ACO_CCCVV varchar(200)        
-        
---set @oldRGC_ACO_CC = (select isnull(RGC_ACO_CC,'') from REGMST where RGNNO=@RGNNO);        
---set @OldRGC_ACO_CCCVV = (select isnull(master.dbo.Udf_blowfishdecrypt(RGC_ACO_CCCVV, 'ILME5fgPicoqFOik+8amMQ=='),'') from REGMST where RGNNO=@RGNNO);         
-        
-Update REGMST                 
-SET                 
-RGD_ACO_ARR = cast(@RGD_ACO_ARR as datetime),                
-RGD_ACO_DEP = cast(@RGD_ACO_DEP as datetime),                
-RGN_ACO_ROOMS = @RGN_ACO_ROOMS,                
-RGC_ACO_BLOCKCODE = @RGC_ACO_BLOCKCODE,                
-RGC_ACO_STATUS = @RGC_ACO_STATUS,                
-RGC_ACO_ADD_REQUEST = @RGC_ACO_ADD_REQUEST,                
-RGC_ACO_AGENT_NOTES = @RGC_ACO_AGENT_NOTES,                
-RGC_ACO_SPCL_REQUESTS = @RGC_ACO_SPCL_REQUESTS,                
-RGC_ACO_CCTYPE = @RGC_ACO_CCTYPE,                
-RGC_ACO_CC = master.dbo.udf_blowfishencrypt(@RGC_ACO_CC, 'ILME5fgPicoqFOik+8amMQ=='),       ---@RGC_ACO_CC,                
-RGC_ACO_CCEXP = master.dbo.udf_blowfishencrypt(@RGC_ACO_CCEXP, 'ILME5fgPicoqFOik+8amMQ=='), ---@RGC_ACO_CCEXP,                
-RGC_ACO_CCNAME = @RGC_ACO_CCNAME,                
-RGD_ACO_CREATE_TIME = GETDATE(),                
-RGN_ACO_HTNNO = @RGN_ACO_HTNNO,        
-RGC_ACO_CCCVV =master.dbo.udf_blowfishencrypt(@RGC_ACO_CCCVV, 'ILME5fgPicoqFOik+8amMQ==')        
-WHERE RGNNO = @RGNNO;                
+ALTER PROC SP_TTLiveLink_rptgetExcelBypass              
+    @From DATETIME =null, @To datetime =NULL            
+            
+/*            
+Created by : Vipin Pandey            
+Created on : 03/11/2025            
+Desc    : to get the TT LiveLink Report details           
+Modified by :  Sankalp (Added Joins & Grouping)          
           
-        
-select RGD_ACO_CREATE_TIME as Result from REGMST WHERE RGNNO = @RGNNO;;                
+            
+*/            
+AS              
+BEGIN              
+    SET NOCOUNT ON;              
+             
+    SELECT     
+	hotelroomblocks.hbclnm [Last Name],
+
+ hotelroomblocks.hbcfnm [First Name],            
+             hotelroomblocks.hbcemail Email,
+ hotelroomblocks.hbctel Phone,            
+             
+ hotelroomblocks.HBCAD1 Address,            
+ hotelroomblocks.HBCCITY City,            
+ hotelroomblocks.HBCST State,            
+ hotelroomblocks.HBCZIP Zip,
+  hotelroomblocks.hbcno [Block Code],         
+ LiveLink  ='https://rdlcapp.ttievent.com/Reports16%5CBlockCnf.aspx?RPT=TTSbBk112_SQL&HBCNO='+hotelroomblocks.hbcno+''  
+     
+  FROM   EVENTS EVENTS             
+ INNER JOIN HOTEL HOTEL ON EVENTS.EMNNO=HOTEL.EMNNO             
+ INNER JOIN HOTELROOMBLOCKS HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO             
+ INNER JOIN             
+ (SELECT hotelroomblocks.hbcfnm , hotelroomblocks.hbclnm, hotelroomblocks.hbcorg,hotelroomblocks.hbcno,HOTELROOMBLOCKINVENTORY.RBDATE,HOTELROOMBLOCKINVENTORY.HBNNO,            
+ sum(case WHEN HOTELROOMBLOCKINVENTORY.rbnamountrequested IS NULL THEN HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED ELSE            
+    HOTELROOMBLOCKINVENTORY.rbnamountrequested END) NoOfRoomsRequestedMaxNight,            
+ SUM(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED+RBNADJUSTMENTS) NoOfRoomsReservedMaxNight,            
+ SUM((HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED+RBNADJUSTMENTS)-RBNREMAININGAVAILABLE) NoOfRoomsPickedMaxNight,            
+ SUM(HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE) NoOfRoomsAvailMaxNight            
+ from  HOTELROOMBLOCKS HOTELROOMBLOCKS             
+ INNER JOIN HOTELROOMBLOCKINVENTORY HOTELROOMBLOCKINVENTORY ON HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO             
+ GROUP BY hotelroomblocks.hbcfnm , hotelroomblocks.hbclnm, hotelroomblocks.hbcorg,hotelroomblocks.hbcno,HOTELROOMBLOCKINVENTORY.RBDATE,HOTELROOMBLOCKINVENTORY.HBNNO)AS HOTELROOMBLOCKINVENTORY            
+ ON HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO            
+             
+ WHERE EVENTS.EMDTBEG>=@From and EVENTS.EMDTBEG<=@To            
+   -- removed per Corey 12.6.2016             
+   -- AND rtrim(HOTELROOMBLOCKS.HBCLNM)+rtrim(HOTELROOMBLOCKS.HBCFNM)<>'ReservationsCancelled'                 
+   and rtrim(HOTELROOMBLOCKS.HBCLNM)+rtrim(HOTELROOMBLOCKS.HBCFNM)<>'CompTournament'                
+   and rtrim(HOTELROOMBLOCKS.HBCLNM)+rtrim(HOTELROOMBLOCKS.HBCFNM)<>'BillingsleyJohn'            
                 
-END        
-end try                             
-  BEGIN CATCH                                    
- INSERT INTO dbo.dbErrorLogs (UserName, ErrorNumber, ErrorState, ErrorSeverity, ErrorLine,                                  
- ErrorProcedure, ErrorMessage, ErrorOccuredOn)                                    
- VALUES (SUSER_SNAME(), ERROR_NUMBER(), ERROR_STATE(), ERROR_SEVERITY(), ERROR_LINE(),                                  
- ERROR_PROCEDURE(), ERROR_MESSAGE(), GETDATE())                               
- select 0  as Result                              
-  END CATCH     
-  
-  
-  
+GROUP BY Events.emcvipdsc1,events.emcnm,Events.emnno ,EVENTS.EMCNO,hotelroomblocks.hbdtstart ,hotelroomblocks.hbdtend, EVENTS.EMDTBEG,             
+ EVENTS.EMDTEND,Hotel.htcdsc,Hotel.htdtcutoff, HBOVERWRITECUTOFFDATE, CAST(hotelroomblocks.HBCINTERNALNOTES AS VARCHAR(1000)),hotelroomblocks.hbcorg ,hotelroomblocks.hbcfnm,hotelroomblocks.hbclnm,hotelroomblocks.hbctel ,            
+ hotelroomblocks.hbcemail ,hotelroomblocks.hbdtrequested ,hotelroomblocks.hbdtapproved ,hotelroomblocks.hbnapproved,hotelroomblocks.hbcno,hotelroomblocks.HBTEAMCUTOFFDATE, HOTELROOMBLOCKS.HBCAGEGROUP,             
+ hotelroomblocks.HBCACRO, Hotel.htnno, hotelroomblocks.hbnno, hotelroomblocks.HBDTINACTIVE,            
+ hotelroomblocks.HBCAD1, hotelroomblocks.HBCCITY,hotelroomblocks.HBCST, hotelroomblocks.HBCZIP            
+ ORDER BY  EVENTS.EMCNM , EVENTS.EMNNO             
+END
