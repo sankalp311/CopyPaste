@@ -1,57 +1,191 @@
-ALTER PROC SP_TTLiveLink_rptgetExcelBypass              
-    @From DATETIME =null, @To datetime =NULL            
-            
-/*            
-Created by : Vipin Pandey            
-Created on : 03/11/2025            
-Desc    : to get the TT LiveLink Report details           
-Modified by :  Sankalp (Added Joins & Grouping)          
-          
-            
-*/            
+
+
+
+Update REPORT_SP_MAP set ExcelBypass = 1  where rmnno in (873,874,875)
+
+
+GO
+
+CREATE OR ALTER  PROC dbo.SP_TTLiveLink_rptgetExcelBypass  
+    @From DATETIME = NULL,  
+    @To   DATETIME = NULL  
+/*  
+Author       : Sankalp  
+Created Date : 13/04/2026  
+Description  : Fetches TT LiveLink report details for Excel bypass export.  
+               Returns block contact details and generates LiveLink URL.  
+               Sorting is aligned with RDLC group sorting expressions.  
+  
+RDLC Sorting Applied:  
+    1. EventBegDate  
+    2. EventName + EMNNO  
+    3. EventName + TeamName + TeamManager + BlockCode  
+*/  
+AS  
+BEGIN  
+    SET NOCOUNT ON;  
+  
+    SELECT  
+        HOTELROOMBLOCKS.HBCLNM  AS [Last Name],  
+        HOTELROOMBLOCKS.HBCFNM  AS [First Name],  
+        HOTELROOMBLOCKS.HBCEMAIL AS [Email],  
+        HOTELROOMBLOCKS.HBCTEL   AS [Phone],  
+        HOTELROOMBLOCKS.HBCAD1   AS [Address],  
+        HOTELROOMBLOCKS.HBCCITY  AS [City],  
+        HOTELROOMBLOCKS.HBCST    AS [State],  
+        HOTELROOMBLOCKS.HBCZIP   AS [Zip],  
+        HOTELROOMBLOCKS.HBCNO    AS [Block Code],  
+        'https://stagereport2.ttievent.com/Reports16%5CBlockCnf.aspx?RPT=TTSbBk112_SQL&HBCNO='   
+            + HOTELROOMBLOCKS.HBCNO AS [LiveLink]  
+    FROM EVENTS AS EVENTS  
+    INNER JOIN HOTEL AS HOTEL  
+        ON EVENTS.EMNNO = HOTEL.EMNNO  
+    INNER JOIN HOTELROOMBLOCKS AS HOTELROOMBLOCKS  
+        ON HOTEL.HTNNO = HOTELROOMBLOCKS.HTNNO  
+    INNER JOIN  
+    (  
+        SELECT  
+            HOTELROOMBLOCKS.HBCFNM,  
+            HOTELROOMBLOCKS.HBCLNM,  
+            HOTELROOMBLOCKS.HBCORG,  
+            HOTELROOMBLOCKS.HBCNO,  
+            HOTELROOMBLOCKINVENTORY.RBDATE,  
+            HOTELROOMBLOCKINVENTORY.HBNNO,  
+            SUM(  
+                CASE  
+                    WHEN HOTELROOMBLOCKINVENTORY.RBNAMOUNTREQUESTED IS NULL  
+                        THEN HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED  
+                    ELSE HOTELROOMBLOCKINVENTORY.RBNAMOUNTREQUESTED  
+                END  
+            ) AS NoOfRoomsRequestedMaxNight,  
+            SUM(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + RBNADJUSTMENTS) AS NoOfRoomsReservedMaxNight,  
+            SUM(  
+                (HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + RBNADJUSTMENTS)  
+                - RBNREMAININGAVAILABLE  
+            ) AS NoOfRoomsPickedMaxNight,  
+            SUM(HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE) AS NoOfRoomsAvailMaxNight  
+        FROM HOTELROOMBLOCKS AS HOTELROOMBLOCKS  
+        INNER JOIN HOTELROOMBLOCKINVENTORY AS HOTELROOMBLOCKINVENTORY  
+            ON HOTELROOMBLOCKS.HBNNO = HOTELROOMBLOCKINVENTORY.HBNNO  
+        GROUP BY  
+            HOTELROOMBLOCKS.HBCFNM,  
+            HOTELROOMBLOCKS.HBCLNM,  
+            HOTELROOMBLOCKS.HBCORG,  
+            HOTELROOMBLOCKS.HBCNO,  
+            HOTELROOMBLOCKINVENTORY.RBDATE,  
+            HOTELROOMBLOCKINVENTORY.HBNNO  
+    ) AS HOTELROOMBLOCKINVENTORY  
+        ON HOTELROOMBLOCKS.HBNNO = HOTELROOMBLOCKINVENTORY.HBNNO  
+    WHERE EVENTS.EMDTBEG >= @From  
+      AND EVENTS.EMDTBEG <= @To  
+      -- AND RTRIM(HOTELROOMBLOCKS.HBCLNM) + RTRIM(HOTELROOMBLOCKS.HBCFNM) <> 'ReservationsCancelled'  
+      AND RTRIM(HOTELROOMBLOCKS.HBCLNM) + RTRIM(HOTELROOMBLOCKS.HBCFNM) <> 'CompTournament'  
+      AND RTRIM(HOTELROOMBLOCKS.HBCLNM) + RTRIM(HOTELROOMBLOCKS.HBCFNM) <> 'BillingsleyJohn'  
+    GROUP BY  
+        EVENTS.EMCVIPDSC1,  
+        EVENTS.EMCNM,  
+        EVENTS.EMNNO,  
+        EVENTS.EMCNO,  
+        HOTELROOMBLOCKS.HBDTSTART,  
+        HOTELROOMBLOCKS.HBDTEND,  
+        EVENTS.EMDTBEG,  
+        EVENTS.EMDTEND,  
+        HOTEL.HTCDSC,  
+        HOTEL.HTDTCUTOFF,  
+        HBOVERWRITECUTOFFDATE,  
+        CAST(HOTELROOMBLOCKS.HBCINTERNALNOTES AS VARCHAR(1000)),  
+        HOTELROOMBLOCKS.HBCORG,  
+        HOTELROOMBLOCKS.HBCFNM,  
+        HOTELROOMBLOCKS.HBCLNM,  
+        HOTELROOMBLOCKS.HBCTEL,  
+        HOTELROOMBLOCKS.HBCEMAIL,  
+        HOTELROOMBLOCKS.HBDTREQUESTED,  
+        HOTELROOMBLOCKS.HBDTAPPROVED,  
+        HOTELROOMBLOCKS.HBNAPPROVED,  
+        HOTELROOMBLOCKS.HBCNO,  
+        HOTELROOMBLOCKS.HBTEAMCUTOFFDATE,  
+        HOTELROOMBLOCKS.HBCAGEGROUP,  
+        HOTELROOMBLOCKS.HBCACRO,  
+        HOTEL.HTNNO,  
+        HOTELROOMBLOCKS.HBNNO,  
+        HOTELROOMBLOCKS.HBDTINACTIVE,  
+        HOTELROOMBLOCKS.HBCAD1,  
+        HOTELROOMBLOCKS.HBCCITY,  
+        HOTELROOMBLOCKS.HBCST,  
+        HOTELROOMBLOCKS.HBCZIP  
+    ORDER BY  
+        EVENTS.EMDTBEG,  
+        ISNULL(CAST(EVENTS.EMCNM AS VARCHAR(500)), '')  
+            + ISNULL(CAST(EVENTS.EMNNO AS VARCHAR(50)), ''),  
+        ISNULL(CAST(EVENTS.EMCNM AS VARCHAR(500)), '')  
+            + ISNULL(CAST(HOTELROOMBLOCKS.HBCORG AS VARCHAR(500)), '')  
+            + ISNULL(CAST(HOTELROOMBLOCKS.HBCFNM AS VARCHAR(200)), '')  
+            + ' '  
+            + ISNULL(CAST(HOTELROOMBLOCKS.HBCLNM AS VARCHAR(200)), '')  
+            + ISNULL(CAST(HOTELROOMBLOCKS.HBCNO AS VARCHAR(100)), '');  
+END;
+
+GO
+
+CREATE OR ALTER     PROCEDURE rpt_TT_RlUpdateDueExcelBypass               
+    @RMNNO     INT,              
+    @EMNNO     VARCHAR(50) = NULL,     -- only explicit WHERE filter              
+    @SessionID NVARCHAR(128) = NULL              
 AS              
 BEGIN              
     SET NOCOUNT ON;              
-             
-    SELECT     
-	hotelroomblocks.hbclnm [Last Name],
-
- hotelroomblocks.hbcfnm [First Name],            
-             hotelroomblocks.hbcemail Email,
- hotelroomblocks.hbctel Phone,            
-             
- hotelroomblocks.HBCAD1 Address,            
- hotelroomblocks.HBCCITY City,            
- hotelroomblocks.HBCST State,            
- hotelroomblocks.HBCZIP Zip,
-  hotelroomblocks.hbcno [Block Code],         
- LiveLink  ='https://rdlcapp.ttievent.com/Reports16%5CBlockCnf.aspx?RPT=TTSbBk112_SQL&HBCNO='+hotelroomblocks.hbcno+''  
-     
-  FROM   EVENTS EVENTS             
- INNER JOIN HOTEL HOTEL ON EVENTS.EMNNO=HOTEL.EMNNO             
- INNER JOIN HOTELROOMBLOCKS HOTELROOMBLOCKS ON HOTEL.HTNNO=HOTELROOMBLOCKS.HTNNO             
- INNER JOIN             
- (SELECT hotelroomblocks.hbcfnm , hotelroomblocks.hbclnm, hotelroomblocks.hbcorg,hotelroomblocks.hbcno,HOTELROOMBLOCKINVENTORY.RBDATE,HOTELROOMBLOCKINVENTORY.HBNNO,            
- sum(case WHEN HOTELROOMBLOCKINVENTORY.rbnamountrequested IS NULL THEN HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED ELSE            
-    HOTELROOMBLOCKINVENTORY.rbnamountrequested END) NoOfRoomsRequestedMaxNight,            
- SUM(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED+RBNADJUSTMENTS) NoOfRoomsReservedMaxNight,            
- SUM((HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED+RBNADJUSTMENTS)-RBNREMAININGAVAILABLE) NoOfRoomsPickedMaxNight,            
- SUM(HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE) NoOfRoomsAvailMaxNight            
- from  HOTELROOMBLOCKS HOTELROOMBLOCKS             
- INNER JOIN HOTELROOMBLOCKINVENTORY HOTELROOMBLOCKINVENTORY ON HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO             
- GROUP BY hotelroomblocks.hbcfnm , hotelroomblocks.hbclnm, hotelroomblocks.hbcorg,hotelroomblocks.hbcno,HOTELROOMBLOCKINVENTORY.RBDATE,HOTELROOMBLOCKINVENTORY.HBNNO)AS HOTELROOMBLOCKINVENTORY            
- ON HOTELROOMBLOCKS.HBNNO=HOTELROOMBLOCKINVENTORY.HBNNO            
-             
- WHERE EVENTS.EMDTBEG>=@From and EVENTS.EMDTBEG<=@To            
-   -- removed per Corey 12.6.2016             
-   -- AND rtrim(HOTELROOMBLOCKS.HBCLNM)+rtrim(HOTELROOMBLOCKS.HBCFNM)<>'ReservationsCancelled'                 
-   and rtrim(HOTELROOMBLOCKS.HBCLNM)+rtrim(HOTELROOMBLOCKS.HBCFNM)<>'CompTournament'                
-   and rtrim(HOTELROOMBLOCKS.HBCLNM)+rtrim(HOTELROOMBLOCKS.HBCFNM)<>'BillingsleyJohn'            
-                
-GROUP BY Events.emcvipdsc1,events.emcnm,Events.emnno ,EVENTS.EMCNO,hotelroomblocks.hbdtstart ,hotelroomblocks.hbdtend, EVENTS.EMDTBEG,             
- EVENTS.EMDTEND,Hotel.htcdsc,Hotel.htdtcutoff, HBOVERWRITECUTOFFDATE, CAST(hotelroomblocks.HBCINTERNALNOTES AS VARCHAR(1000)),hotelroomblocks.hbcorg ,hotelroomblocks.hbcfnm,hotelroomblocks.hbclnm,hotelroomblocks.hbctel ,            
- hotelroomblocks.hbcemail ,hotelroomblocks.hbdtrequested ,hotelroomblocks.hbdtapproved ,hotelroomblocks.hbnapproved,hotelroomblocks.hbcno,hotelroomblocks.HBTEAMCUTOFFDATE, HOTELROOMBLOCKS.HBCAGEGROUP,             
- hotelroomblocks.HBCACRO, Hotel.htnno, hotelroomblocks.hbnno, hotelroomblocks.HBDTINACTIVE,            
- hotelroomblocks.HBCAD1, hotelroomblocks.HBCCITY,hotelroomblocks.HBCST, hotelroomblocks.HBCZIP            
- ORDER BY  EVENTS.EMCNM , EVENTS.EMNNO             
-END
+            
+    /* Final select – dates formatted as mm/dd/yyyy (no time) */              
+    SELECT              
+        CONVERT(VARCHAR(10), H.HTDTRMLISTDUE, 101) AS [RL Due Date],   -- RL Due Date (mm/dd/yyyy)              
+        H.HTCDSC                                   AS [Hotel Name],              
+        E.EMCNM                                    AS [Event Name],              
+        CONVERT(VARCHAR(10), E.EMDTBEG, 101)       AS [Event Start],  -- mm/dd/yyyy              
+        CONVERT(VARCHAR(10), E.EMDTEND, 101)       AS [Event End]    -- mm/dd/yyyy    
+    FROM ICM.dbo.EVENTS AS E              
+    INNER JOIN ICM.dbo.HOTEL  AS H              
+        ON H.EMNNO = E.EMNNO              
+    WHERE                
+       E.CUNNO = 2          
+      AND  H.HTDTRMLISTDUE >= CAST(GETDATE() AS date)           
+    ORDER BY H.HTDTRMLISTDUE, E.EMCNM+E.EMCNO;           
+END;   
+  
+  
+  GO
+  
+    
+  
+CREATE OR ALTER PROC rpt_TT_RmListDatesDueExcelBypass            
+    @RMNNO      int,            
+    @EMNNO      varchar(50) = NULL,            
+    @SessionID  nvarchar(128) = NULL            
+AS            
+BEGIN            
+    SET NOCOUNT ON;            
+            
+    /*Final result */            
+    SELECT            
+        CONVERT(VARCHAR(10), H.HTDTCUTOFF, 101)    AS [RL Due Date],   -- mm/dd/yyyy            
+        H.HTCDSC                                   AS [Hotel Name],             
+        E.EMCNM                                    AS [Event Name],             
+        CONVERT(VARCHAR(10), E.EMDTBEG, 101)       AS [Event Start],   -- mm/dd/yyyy            
+        CONVERT(VARCHAR(10), E.EMDTEND, 101)       AS [Event End]      -- mm/dd/yyyy      
+    FROM ICM.dbo.EVENTS AS E            
+    INNER JOIN ICM.dbo.HOTEL  AS H            
+        ON H.EMNNO = E.EMNNO            
+    WHERE           
+        -- same as Crystal: EVENTS.CUNNO = 2          
+        E.CUNNO = 2          
+        -- optional extra filter if EMNNO is passed / parsed from RMCWHERE          
+        -- AND (@EMNNO IS NULL OR E.EMNNO = @EMNNO)          
+        -- same as Crystal: HOTEL.HTDTRMLISTDUE >= CurrentDate          
+        AND (          
+               H.HTDTCUTOFF >= CONVERT(date, GETDATE())          
+            )          
+    ORDER BY H.HTDTCUTOFF, E.EMCNM+E.EMCNO;            
+END   
+  
+  GO
+  
+  
