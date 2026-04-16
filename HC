@@ -1,191 +1,991 @@
+@model EventManagerWeb.Areas.Admin.Models.ReportGroupsHT152Vm
+
+@{
+     ViewData["Title"] = "Report Groups - HT152";
+     Layout = null;
+     var selectedHotelId = Model?.SelectedHotelId ?? "";
+
+     var fromDate = string.IsNullOrWhiteSpace(Model?.FromDate) ? "12/01/2025" : Model.FromDate;
+     var toDate = string.IsNullOrWhiteSpace(Model?.ToDate) ? "12/24/2025" : Model.ToDate;
+
+     var comments = Model?.Comments ?? "Sample comments...";
+
+     var frmHour = string.IsNullOrWhiteSpace(Model?.FrmHour) ? "10" : Model.FrmHour;
+     var frmMin = string.IsNullOrWhiteSpace(Model?.FrmMin) ? "00" : Model.FrmMin;
+     var frmAmPm = string.IsNullOrWhiteSpace(Model?.FrmAmPm) ? "AM" : Model.FrmAmPm;
+
+     var toHour = string.IsNullOrWhiteSpace(Model?.ToHour) ? "12" : Model.ToHour;
+     var toMin = string.IsNullOrWhiteSpace(Model?.ToMin) ? "30" : Model.ToMin;
+     var toAmPm = string.IsNullOrWhiteSpace(Model?.ToAmPm) ? "PM" : Model.ToAmPm;
+
+     var chkNew = Model?.ChkNew ?? true;
+     var chkChanged = Model?.ChkChanged ?? true;
+     // var chkCanceled = Model?.ChkCanceled ?? false;
+	 var chkCanceled = true;
+	 
+}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+
+
+<link href="~/css/ht152.css" rel="stylesheet" />
+<script src="~/js/admin/ht152.js"></script>
+<div class="ht152-page">
+     <div class="ht152-frame">
+          <form id="frmHT152" novalidate>
+               <div class="ht152-header">
+                    <div class="ht152-title">
+                         <h1>Rooming List Report: HT152</h1>
+                    </div>
+
+                    <div class="ht152-header-right">
+                         <div class="ht152-badge">REPORT ID: HT152</div>
+
+               @*           <button type="button" class="ht152-btn ht152-btn-secondary" onclick="HT152_DownloadSelected()">
+                              <i class="fas fa-download"></i> Download
+                         </button> *@
+                    </div>
+               </div>
+               <!-- ✅ Nice page alert (hidden by default) -->
+               <div id="ht152Alert" class="ht152-alert" style="display:none;">
+                    <div class="ht152-alert-icon" id="ht152AlertIcon">⚠️</div>
+                    <div class="ht152-alert-text" id="ht152AlertText"></div>
+                    <button type="button" class="ht152-alert-close" onclick="HT152_HideAlert()">✕</button>
+               </div>
+
+               <div class="ht152-content">
+
+                    <!-- Hotel -->
+                    <div class="ht152-form-group">
+                         <label class="ht152-label" for="ddlHotelList">Hotel</label>
+                         <select id="ddlHotelList" class="ht152-control ht152-select">
+                           @*    <option value="">-- Select Hotel --</option> *@
+
+                              @if (Model?.Hotels != null && Model.Hotels.Count > 0)
+                              {
+                                   foreach (var h in Model.Hotels)
+                                   {
+                                        if ((h.Value ?? "") == selectedHotelId)
+                                        {
+                                             <option value="@h.Value" selected="selected">@h.Text</option>
+                                        }
+                                        else
+                                        {
+                                             <option value="@h.Value">@h.Text</option>
+                                        }
+                                   }
+                              }
+                              else
+                              {
+                                   <option value="101" selected="selected">Hilton Downtown (101)</option>
+                                   <option value="205">Marriott Airport (205)</option>
+                                   <option value="309">Hyatt City Center (309)</option>
+                              }
+                         </select>
+                         <div class="ht152-help">Select a hotel to generate the rooming list report.</div>
+                    </div>
+
+                <div class="ht152-merge-panel show" id="mergePanelWrap" hidden>
+                   
+                </div>
+
+                    <!-- Date Range -->
+                    <div class="ht152-form-group">
+                         <label class="ht152-label">Date Range</label>
+
+                         <input type="hidden" id="hdnToday" value="@Model.CurrentDate" />
+
+                         <div class="ht152-datetime">
+                              <input id="txtFromDate"
+                                     class="ht152-control ht152-date"
+                                     value="@Model.FromDate"
+                                     placeholder="MM/DD/YYYY"
+                                     readonly
+                                     autocomplete="off" />
+
+                              <select id="ddlFrmHour" class="ht152-control ht152-select ht152-hour">
+                                   @foreach (var h in Model.Hours)
+                                   {
+                                        if ((h.Value ?? "") == (Model.FrmHour ?? ""))
+                                        {
+                                             <option value="@h.Value" selected="selected">@h.Text</option>
+                                        }
+                                        else
+                                        {
+                                             <option value="@h.Value">@h.Text</option>
+                                        }
+                                   }
+                              </select>
+
+                              <select id="ddlFrmMin" class="ht152-control ht152-select ht152-time">
+                                   @foreach (var m in Model.Minutes)
+                                   {
+                                        if ((m.Value ?? "") == (Model.FrmMin ?? ""))
+                                        {
+                                             <option value="@m.Value" selected="selected">@m.Text</option>
+                                        }
+                                        else
+                                        {
+                                             <option value="@m.Value">@m.Text</option>
+                                        }
+                                   }
+                              </select>
+
+                              <select id="ddlFrmAmPM" class="ht152-control ht152-select ht152-time">
+                                   @foreach (var ap in Model.AmPm)
+                                   {
+                                        if ((ap.Value ?? "") == (Model.FrmAmPm ?? ""))
+                                        {
+                                             <option value="@ap.Value" selected="selected">@ap.Text</option>
+                                        }
+                                        else
+                                        {
+                                             <option value="@ap.Value">@ap.Text</option>
+                                        }
+                                   }
+                              </select>
+
+                              <span class="ht152-sep">to</span>
+
+
+                              <input id="txtToDate"
+                                     class="ht152-control ht152-date"
+                                     value="@Model.ToDate"
+                                     placeholder="MM/DD/YYYY"
+                                     readonly
+                                     autocomplete="off" />
+
+                              <select id="ddlToHour" class="ht152-control ht152-select ht152-time">
+                                   @foreach (var h in Model.Hours)
+                                   {
+                                        if ((h.Value ?? "") == (Model.ToHour ?? ""))
+                                        {
+                                             <option value="@h.Value" selected="selected">@h.Text</option>
+                                        }
+                                        else
+                                        {
+                                             <option value="@h.Value">@h.Text</option>
+                                        }
+                                   }
+                              </select>
+
+                              <select id="ddlToMin" class="ht152-control ht152-select ht152-time">
+                                   @foreach (var m in Model.Minutes)
+                                   {
+                                        if ((m.Value ?? "") == (Model.ToMin ?? ""))
+                                        {
+                                             <option value="@m.Value" selected="selected">@m.Text</option>
+                                        }
+                                        else
+                                        {
+                                             <option value="@m.Value">@m.Text</option>
+                                        }
+                                   }
+                              </select>
+
+                              <select id="ddlToAmPM" class="ht152-control ht152-select ht152-time">
+                                   @foreach (var ap in Model.AmPm)
+                                   {
+                                        if ((ap.Value ?? "") == (Model.ToAmPm ?? ""))
+                                        {
+                                             <option value="@ap.Value" selected="selected">@ap.Text</option>
+                                        }
+                                        else
+                                        {
+                                             <option value="@ap.Value">@ap.Text</option>
+                                        }
+                                   }
+                              </select>
+                         </div>
+
+                         <div class="ht152-help">Select start and end date/time for the report period.</div>
+                    </div>
+
+
+                    <!-- Comments -->
+                    @* <div class="ht152-form-group">
+                         <label class="ht152-label" for="TxtComments">Comments</label>
+                         <input id="TxtComments" class="ht152-control" value="@comments" />
+                         <div class="ht152-help">Optional: add comments to include with the generated report.</div>
+                    </div> *@
+
+                    <!-- Report Types -->
+                    <div class="ht152-form-group">
+                         <label class="ht152-label">Report Types</label>
+
+                         <div class="ht152-checkboxes">
+                              <label class="ht152-check">
+                                   @if (chkNew)
+                                   {
+                                        <input type="checkbox" id="ChkNew" checked="checked" />
+                                   }
+                                   else
+                                   {
+                                        <input type="checkbox" id="ChkNew" />
+                                   }
+                                   <span class="ht152-box"></span>
+                                   <span>New Reservations</span>
+                              </label>
+
+                              <label class="ht152-check">
+                                   @if (chkChanged)
+                                   {
+                                        <input type="checkbox" id="ChkChanged" checked="checked" />
+                                   }
+                                   else
+                                   {
+                                        <input type="checkbox" id="ChkChanged" />
+                                   }
+                                   <span class="ht152-box"></span>
+                                   <span>Changed Reservations</span>
+                              </label>
+
+                              <label class="ht152-check">
+                                   @if (chkCanceled)
+                                   {
+                                        <input type="checkbox" id="ChkCanceled" checked="checked" />
+                                   }
+                                   else
+                                   {
+                                        <input type="checkbox" id="ChkCanceled" />
+                                   }
+                                   <span class="ht152-box"></span>
+                                   <span>Canceled Reservations</span>
+                              </label>
+                         </div>
+
+                        @*  <div class="ht152-help">Select at least one report type.</div> *@
+                    </div>
+
+                    <!-- Buttons -->
+                    <div class="ht152-actions">
+                   @*  <button type="button" class="ht152-btn ht152-btn-primary" onclick="HT152_Process()" id="btnGenerateHotel">
+                              <span>📊</span> Generate Report
+                         </button> *@
+                    <button type="button" id="btnGenerate" class="ht152-btn ht152-btn-primary" style="display: none;">
+                        📊 Generate Report
+                    </button>
+
+                      @*    <button type="button" class="ht152-btn ht152-btn-secondary" onclick="HT152_Reset()">
+                              Reset
+                         </button> *@
+                    </div>
+
+                    <!-- Report History -->
+                    <div class="ht152-reports">
+                         <div class="ht152-section-title">Report History</div>
+
+                         <div class="ht152-list" id="HT152ReportHistory">
+                              
+                         </div>
+                    </div>
+
+               </div>
+          </form>
+
+          <!-- Processing Overlay -->
+          <div id="Processing" class="ht152-overlay">
+               <div class="box">
+                    <div class="ht152-spinner"></div>
+                    <div style="font-weight:800;margin-bottom:8px;font-size:16px;color:var(--text-dark);">Generating Report</div>
+                    <div style="font-size:14px;color:var(--text-medium);">Processing your rooming list data...</div>
+               </div>
+          </div>
+     </div>
+</div>
+<div class="modal-overlay" id="confirmModal">
+    <div class="modal-box">
+        <div class="modal-title" id="confirmModalTitle">Confirm Merged Report</div>
+        <div class="modal-body">
+            <div id="confirmModalBody"></div>
+            <div class="modal-cross-note" id="confirmCrossNote">
+                🔀 <strong>Cross-event merge detected.</strong> One or more selected hotels belong to a different event. Reservations from multiple events will be combined into a single rooming list.
+            </div>
+        </div>
+        <div class="modal-actions">
+            <button type="button" class="modal-btn modal-btn-cancel" id="btnModalCancel">Cancel</button>
+            <button type="button" class="modal-btn modal-btn-ok" id="btnModalOk">OK, Proceed</button>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 
 
 
-Update REPORT_SP_MAP set ExcelBypass = 1  where rmnno in (873,874,875)
+                
+				
+				js
+				
+				
+				
+				
+
+document.addEventListener("DOMContentLoaded", function () {
+
+     // safety check
+     if (typeof flatpickr === "undefined") {
+          console.error("flatpickr not loaded");
+          return;
+     }
+
+     const fromEl = document.getElementById("txtFromDate");
+     const toEl = document.getElementById("txtToDate");
+
+     if (!fromEl || !toEl) {
+          console.error("Date inputs not found");
+          return;
+     }
+
+     // ✅ real calendar picker
+     window.fpFrom = flatpickr(fromEl, {
+          dateFormat: "m/d/Y",
+          allowInput: false,
+          clickOpens: true,
+          defaultDate: fromEl.value
+     });
+
+     window.fpTo = flatpickr(toEl, {
+          dateFormat: "m/d/Y",
+          allowInput: false,
+          clickOpens: true,
+          defaultDate: toEl.value
+     });
+});
 
 
-GO
+// wwwroot/js/ht152.js
+(function () {
 
-CREATE OR ALTER  PROC dbo.SP_TTLiveLink_rptgetExcelBypass  
-    @From DATETIME = NULL,  
-    @To   DATETIME = NULL  
-/*  
-Author       : Sankalp  
-Created Date : 13/04/2026  
-Description  : Fetches TT LiveLink report details for Excel bypass export.  
-               Returns block contact details and generates LiveLink URL.  
-               Sorting is aligned with RDLC group sorting expressions.  
-  
-RDLC Sorting Applied:  
-    1. EventBegDate  
-    2. EventName + EMNNO  
-    3. EventName + TeamName + TeamManager + BlockCode  
-*/  
-AS  
-BEGIN  
-    SET NOCOUNT ON;  
-  
-    SELECT  
-        HOTELROOMBLOCKS.HBCLNM  AS [Last Name],  
-        HOTELROOMBLOCKS.HBCFNM  AS [First Name],  
-        HOTELROOMBLOCKS.HBCEMAIL AS [Email],  
-        HOTELROOMBLOCKS.HBCTEL   AS [Phone],  
-        HOTELROOMBLOCKS.HBCAD1   AS [Address],  
-        HOTELROOMBLOCKS.HBCCITY  AS [City],  
-        HOTELROOMBLOCKS.HBCST    AS [State],  
-        HOTELROOMBLOCKS.HBCZIP   AS [Zip],  
-        HOTELROOMBLOCKS.HBCNO    AS [Block Code],  
-        'https://stagereport2.ttievent.com/Reports16%5CBlockCnf.aspx?RPT=TTSbBk112_SQL&HBCNO='   
-            + HOTELROOMBLOCKS.HBCNO AS [LiveLink]  
-    FROM EVENTS AS EVENTS  
-    INNER JOIN HOTEL AS HOTEL  
-        ON EVENTS.EMNNO = HOTEL.EMNNO  
-    INNER JOIN HOTELROOMBLOCKS AS HOTELROOMBLOCKS  
-        ON HOTEL.HTNNO = HOTELROOMBLOCKS.HTNNO  
-    INNER JOIN  
-    (  
-        SELECT  
-            HOTELROOMBLOCKS.HBCFNM,  
-            HOTELROOMBLOCKS.HBCLNM,  
-            HOTELROOMBLOCKS.HBCORG,  
-            HOTELROOMBLOCKS.HBCNO,  
-            HOTELROOMBLOCKINVENTORY.RBDATE,  
-            HOTELROOMBLOCKINVENTORY.HBNNO,  
-            SUM(  
-                CASE  
-                    WHEN HOTELROOMBLOCKINVENTORY.RBNAMOUNTREQUESTED IS NULL  
-                        THEN HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED  
-                    ELSE HOTELROOMBLOCKINVENTORY.RBNAMOUNTREQUESTED  
-                END  
-            ) AS NoOfRoomsRequestedMaxNight,  
-            SUM(HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + RBNADJUSTMENTS) AS NoOfRoomsReservedMaxNight,  
-            SUM(  
-                (HOTELROOMBLOCKINVENTORY.RBNAMOUNTRESERVED + RBNADJUSTMENTS)  
-                - RBNREMAININGAVAILABLE  
-            ) AS NoOfRoomsPickedMaxNight,  
-            SUM(HOTELROOMBLOCKINVENTORY.RBNREMAININGAVAILABLE) AS NoOfRoomsAvailMaxNight  
-        FROM HOTELROOMBLOCKS AS HOTELROOMBLOCKS  
-        INNER JOIN HOTELROOMBLOCKINVENTORY AS HOTELROOMBLOCKINVENTORY  
-            ON HOTELROOMBLOCKS.HBNNO = HOTELROOMBLOCKINVENTORY.HBNNO  
-        GROUP BY  
-            HOTELROOMBLOCKS.HBCFNM,  
-            HOTELROOMBLOCKS.HBCLNM,  
-            HOTELROOMBLOCKS.HBCORG,  
-            HOTELROOMBLOCKS.HBCNO,  
-            HOTELROOMBLOCKINVENTORY.RBDATE,  
-            HOTELROOMBLOCKINVENTORY.HBNNO  
-    ) AS HOTELROOMBLOCKINVENTORY  
-        ON HOTELROOMBLOCKS.HBNNO = HOTELROOMBLOCKINVENTORY.HBNNO  
-    WHERE EVENTS.EMDTBEG >= @From  
-      AND EVENTS.EMDTBEG <= @To  
-      -- AND RTRIM(HOTELROOMBLOCKS.HBCLNM) + RTRIM(HOTELROOMBLOCKS.HBCFNM) <> 'ReservationsCancelled'  
-      AND RTRIM(HOTELROOMBLOCKS.HBCLNM) + RTRIM(HOTELROOMBLOCKS.HBCFNM) <> 'CompTournament'  
-      AND RTRIM(HOTELROOMBLOCKS.HBCLNM) + RTRIM(HOTELROOMBLOCKS.HBCFNM) <> 'BillingsleyJohn'  
-    GROUP BY  
-        EVENTS.EMCVIPDSC1,  
-        EVENTS.EMCNM,  
-        EVENTS.EMNNO,  
-        EVENTS.EMCNO,  
-        HOTELROOMBLOCKS.HBDTSTART,  
-        HOTELROOMBLOCKS.HBDTEND,  
-        EVENTS.EMDTBEG,  
-        EVENTS.EMDTEND,  
-        HOTEL.HTCDSC,  
-        HOTEL.HTDTCUTOFF,  
-        HBOVERWRITECUTOFFDATE,  
-        CAST(HOTELROOMBLOCKS.HBCINTERNALNOTES AS VARCHAR(1000)),  
-        HOTELROOMBLOCKS.HBCORG,  
-        HOTELROOMBLOCKS.HBCFNM,  
-        HOTELROOMBLOCKS.HBCLNM,  
-        HOTELROOMBLOCKS.HBCTEL,  
-        HOTELROOMBLOCKS.HBCEMAIL,  
-        HOTELROOMBLOCKS.HBDTREQUESTED,  
-        HOTELROOMBLOCKS.HBDTAPPROVED,  
-        HOTELROOMBLOCKS.HBNAPPROVED,  
-        HOTELROOMBLOCKS.HBCNO,  
-        HOTELROOMBLOCKS.HBTEAMCUTOFFDATE,  
-        HOTELROOMBLOCKS.HBCAGEGROUP,  
-        HOTELROOMBLOCKS.HBCACRO,  
-        HOTEL.HTNNO,  
-        HOTELROOMBLOCKS.HBNNO,  
-        HOTELROOMBLOCKS.HBDTINACTIVE,  
-        HOTELROOMBLOCKS.HBCAD1,  
-        HOTELROOMBLOCKS.HBCCITY,  
-        HOTELROOMBLOCKS.HBCST,  
-        HOTELROOMBLOCKS.HBCZIP  
-    ORDER BY  
-        EVENTS.EMDTBEG,  
-        ISNULL(CAST(EVENTS.EMCNM AS VARCHAR(500)), '')  
-            + ISNULL(CAST(EVENTS.EMNNO AS VARCHAR(50)), ''),  
-        ISNULL(CAST(EVENTS.EMCNM AS VARCHAR(500)), '')  
-            + ISNULL(CAST(HOTELROOMBLOCKS.HBCORG AS VARCHAR(500)), '')  
-            + ISNULL(CAST(HOTELROOMBLOCKS.HBCFNM AS VARCHAR(200)), '')  
-            + ' '  
-            + ISNULL(CAST(HOTELROOMBLOCKS.HBCLNM AS VARCHAR(200)), '')  
-            + ISNULL(CAST(HOTELROOMBLOCKS.HBCNO AS VARCHAR(100)), '');  
-END;
+  const ALERT_AUTO_HIDE_MS = 2500;
 
-GO
+  function showOverlay() {
+    const el = document.getElementById("Processing");
+    if (el) el.style.display = "flex";
+  }
 
-CREATE OR ALTER     PROCEDURE rpt_TT_RlUpdateDueExcelBypass               
-    @RMNNO     INT,              
-    @EMNNO     VARCHAR(50) = NULL,     -- only explicit WHERE filter              
-    @SessionID NVARCHAR(128) = NULL              
-AS              
-BEGIN              
-    SET NOCOUNT ON;              
-            
-    /* Final select – dates formatted as mm/dd/yyyy (no time) */              
-    SELECT              
-        CONVERT(VARCHAR(10), H.HTDTRMLISTDUE, 101) AS [RL Due Date],   -- RL Due Date (mm/dd/yyyy)              
-        H.HTCDSC                                   AS [Hotel Name],              
-        E.EMCNM                                    AS [Event Name],              
-        CONVERT(VARCHAR(10), E.EMDTBEG, 101)       AS [Event Start],  -- mm/dd/yyyy              
-        CONVERT(VARCHAR(10), E.EMDTEND, 101)       AS [Event End]    -- mm/dd/yyyy    
-    FROM ICM.dbo.EVENTS AS E              
-    INNER JOIN ICM.dbo.HOTEL  AS H              
-        ON H.EMNNO = E.EMNNO              
-    WHERE                
-       E.CUNNO = 2          
-      AND  H.HTDTRMLISTDUE >= CAST(GETDATE() AS date)           
-    ORDER BY H.HTDTRMLISTDUE, E.EMCNM+E.EMCNO;           
-END;   
-  
-  
-  GO
-  
+  function hideOverlay() {
+    const el = document.getElementById("Processing");
+    if (el) el.style.display = "none";
+  }
+
+  // ✅ Global so your button onclick works
+  window.HT152_ShowAlert = function (message, type) {
+    const box = document.getElementById("ht152Alert");
+    const txt = document.getElementById("ht152AlertText");
+    const ico = document.getElementById("ht152AlertIcon");
+    if (!box || !txt || !ico) return;
+
+    box.classList.remove("error", "info", "success");
+    box.classList.add(type || "info");
+
+    ico.textContent = (type === "success") ? "✅" : (type === "error") ? "⚠️" : "ℹ️";
+    txt.textContent = message;
+
+    box.style.display = "flex";
+    requestAnimationFrame(() => box.classList.add("show"));
+
+    // ✅ auto-hide in 2.5 sec
+    clearTimeout(window.__ht152AlertTimer);
+    window.__ht152AlertTimer = setTimeout(() => window.HT152_HideAlert(), ALERT_AUTO_HIDE_MS);
+  };
+
+  // ✅ Global so close button onclick works
+  window.HT152_HideAlert = function () {
+    const box = document.getElementById("ht152Alert");
+    if (!box) return;
+
+    clearTimeout(window.__ht152AlertTimer);
+
+    box.classList.remove("show");
+    setTimeout(() => { box.style.display = "none"; }, 220);
+  };
+
+  // ✅ reusable binder
+  window.HT152_BindHistory = function (history) {
+    const box = document.getElementById("HT152ReportHistory");
+    if (!box) return;
+
+    box.innerHTML = "";
+
+    if (!history || history.length === 0) {
+      box.innerHTML = `
+        <div class="ht152-item">
+          <div class="ht152-type">-</div>
+          <div class="ht152-name">No history found for this hotel.</div>
+          <div class="ht152-action"></div>
+        </div>`;
+      return;
+    }
+
+    // header row
+    const header = document.createElement("div");
+    header.className = "ht152-item ht152-header";
+    header.innerHTML = `
+      <div class="ht152-type">Report Type</div>
+      <div class="ht152-name">Report Name</div>
+    `;
+    box.appendChild(header);
+
+    history.forEach(r => {
+      const type = r.rpttype ?? r.RPTTYPE ?? "";
+      const url = r.rpturl ?? r.RPTURL ?? "";
+      const name = r.rptname ?? r.RPTNAME ?? "";
+
+      const displayRaw = (name && name.trim()) ? name : url;
+      const display = String(displayRaw).split(/[\\/]/).pop();
+
+      const div = document.createElement("div");
+      div.className = "ht152-item";
+      div.innerHTML = `
+        <div class="ht152-type">${type}</div>
+        <div class="ht152-name">${display}</div>
+      `;
+      box.appendChild(div);
+    });
+  };
+
+ 
+
+  // ✅ On hotel change
+  window.HT152_OnHotelChange = async function () {
+    const hotelId = parseInt(document.getElementById("ddlHotelList").value || "0", 10);
+
+      HotelDetailsWithRFP(hotelId);
+    if (!hotelId) {
+      window.HT152_BindHistory([]);
+      return;
+    }
+
+    const res = await fetch("/Admin/ReportHT152/GetDefaultFromTo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ hotelId })
+    });
+
+    const data = await res.json();
+    if (!data) return;
+
+    const fromDate = data.fromDate || data.FromDate || "";
+    const toDate = data.toDate || data.ToDate || "";
+
+    document.getElementById("txtFromDate").value = fromDate;
+    document.getElementById("txtToDate").value = toDate;
+
+    if (window.fpFrom && fromDate) window.fpFrom.setDate(fromDate, true, "m/d/Y");
+    if (window.fpTo && toDate) window.fpTo.setDate(toDate, true, "m/d/Y");
+
+    document.getElementById("ddlFrmHour").value = data.frmHour || data.FrmHour || "12";
+    document.getElementById("ddlFrmMin").value = data.frmMin || data.FrmMin || "00";
+    document.getElementById("ddlFrmAmPM").value = data.frmAmPm || data.FrmAmPm || "AM";
+
+    document.getElementById("ddlToHour").value = data.toHour || data.ToHour || "12";
+    document.getElementById("ddlToMin").value = data.toMin || data.ToMin || "00";
+    document.getElementById("ddlToAmPM").value = data.toAmPm || data.ToAmPm || "AM";
+
+    window.HT152_BindHistory(data.history || data.History || []);
+  };
+
+  // ✅ Generate report (no window.open)
+  window.HT152_Process = async function () {
+    const hotelVal = (document.getElementById("ddlHotelList").value || "").trim();
+    const hotelId = parseInt(hotelVal || "0", 10);
+
+    if (!hotelId) {
+      window.HT152_ShowAlert("Please select a hotel before generating the report.", "error");
+      return;
+    }
+
+    const chkNew = document.getElementById("ChkNew").checked;
+    const chkChanged = document.getElementById("ChkChanged").checked;
+    const chkCanceled = document.getElementById("ChkCanceled").checked;
+
+    if (!chkNew && !chkChanged && !chkCanceled) {
+      window.HT152_ShowAlert("Please select at least one Report Type (New / Changed / Canceled).", "error");
+      return;
+    }
+
+    window.HT152_HideAlert();
+    showOverlay();
+
+    const payload = {
+      hotelId: hotelId,
+      fromDate: document.getElementById("txtFromDate").value,
+      toDate: document.getElementById("txtToDate").value,
+
+      frmHour: document.getElementById("ddlFrmHour").value,
+      frmMin: document.getElementById("ddlFrmMin").value,
+      frmAmPm: document.getElementById("ddlFrmAmPM").value,
+
+      toHour: document.getElementById("ddlToHour").value,
+      toMin: document.getElementById("ddlToMin").value,
+      toAmPm: document.getElementById("ddlToAmPM").value,
+
+      chkNew: chkNew,
+      chkChanged: chkChanged,
+      chkCanceled: chkCanceled,
+
+      reportid: 0
+    };
+
+    try {
+      const res = await fetch("/Admin/ReportHT152/Process", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await res.json();
+      window.HT152_BindHistory(data.history || data.History || []);
+
+      // ✅ auto-hide success alert in 2.5 sec
+      window.HT152_ShowAlert("Report generated and saved in history.", "success");
+    } catch (e) {
+      window.HT152_ShowAlert("Something went wrong while generating the report. Please try again.", "error");
+    } finally {
+      hideOverlay();
+    }
+  };
+
+  function initFlatpickr() {
+    if (typeof flatpickr === "undefined") {
+      console.error("flatpickr not loaded");
+      return;
+    }
+
+    const fromEl = document.getElementById("txtFromDate");
+    const toEl = document.getElementById("txtToDate");
+    if (!fromEl || !toEl) return;
+
+    window.fpFrom = flatpickr(fromEl, {
+      dateFormat: "m/d/Y",
+      allowInput: false,
+      clickOpens: true,
+      defaultDate: fromEl.value
+    });
+
+    window.fpTo = flatpickr(toEl, {
+      dateFormat: "m/d/Y",
+      allowInput: false,
+      clickOpens: true,
+      defaultDate: toEl.value
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    initFlatpickr();
+
+    const ddl = document.getElementById("ddlHotelList");
+    if (ddl) ddl.addEventListener("change", window.HT152_OnHotelChange);
+
+    window.HT152_OnHotelChange();
+  });
+})();
+
+
+async function HotelDetailsWithRFP(hotelId) {
+
+    const HotelRequest = {
+        HotelId: hotelId,
+    };
+
+    const res = await fetch("/Admin/ReportHT152/HotelDetailsWithRFP", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(HotelRequest)
+    });
+
+    const data = await res.json();
+    if (!data || data.length === 0) return;
+
+    const panel = document.getElementById("mergePanelWrap");
+
+    // Hide initially
+    panel.style.display = "none";
+
+    if (data.length > 1) {
+
+        // 👉 Get main event (first record)
+        const mainEvent = data[0].emcno; // or use emnno
+
+        // 👉 Split data
+        const sameEventHotels = data.filter(d => d.emcno === mainEvent);
+        const crossEventHotels = data.filter(d => d.emcno !== mainEvent);
+
+        panel.removeAttribute("hidden");
+        panel.style.display = "block";
+
+        let html = '';
+
+        // ================= PANEL HEADER =================
+        html += `
+            <div class="merge-panel-head">
+                <div class="merge-panel-title">⤢ Related hotel versions detected</div>
+                <div class="merge-panel-subtitle">
+                    Select the versions you want to include in your merged rooming list.
+                </div>
+            </div>
+        `;
+
+        // ================= SAME EVENT SECTION =================
+        html += `<div class="merge-panel-body" id="mergeHotelList">`;
+
+        sameEventHotels.forEach((d, index) => {
+
+            let isPrimary = index === 0 ? 'is-primary is-checked' : '';
+            let isDisabled = index === 0 ? 'disabled checked' : '';
+
+            html += `
+                <div class="merge-hotel-item ${isPrimary}" data-id="${d.htnno}">
+                    <input type="checkbox" ${isDisabled}>
+                    <div class="hotel-info">
+                        <div class="hotel-name">${d.htcdsc || ''}</div>
+                        <div class="hotel-meta">
+                            <span class="rfp-badge-inline">RFP: ${d.htcrfpid || ''}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+
+        html += `</div>`; // close body
+
+        // ================= SUMMARY =================
+        
+
+        // ================= CROSS EVENT SECTION =================
+        if (crossEventHotels.length > 0) {
+
+            html += `<div class="merge-section-divider cross-divider">Different Event</div>`;
+
+            crossEventHotels.forEach(d => {
+                html += `
+                    <div class="merge-hotel-item is-cross" data-id="${d.htnno}">
+                        <input type="checkbox">
+                        <div class="hotel-info">
+                            <div class="hotel-name">${d.htcdsc || ''}</div>
+                            <div class="hotel-meta">
+                                <span class="rfp-badge-inline">RFP: ${d.htcrfpid || ''}</span>
+                            </div>
+                        </div>
+                        <span class="event-tag">Event: ${d.emcno || ''}</span>
+                    </div>
+                `;
+            });
+        }
+        html += `
+            <div class="merge-summary show" id="mergeSummary">
+                <strong>Selected for merge:</strong>
+                <div class="merge-chips" id="mergeSummaryChips">
+                    <span class="merge-chip">
+                        ${sameEventHotels.length > 0 ? sameEventHotels[0].htcdsc : ''}
+                    </span>
+                </div>
+            </div>
+        `;
+        // ================= RENDER =================
+        panel.innerHTML = html;
+
+        panel.addEventListener("change", function (e) {
+
+            if (e.target.type === "checkbox") {
+
+                // ❌ جلوگیری cross-event selection (optional)
+               
+
+                updateSelectedHotels();
+            }
+        });
+
+
+       
+        function updateSelectedHotels() {
+
+            const chipsContainer = panel.querySelector("#mergeSummaryChips");
+            chipsContainer.innerHTML = "";
+
+            const selectedItems = panel.querySelectorAll(".merge-hotel-item input[type='checkbox']:checked");
+
+            selectedItems.forEach(cb => {
+                const parent = cb.closest(".merge-hotel-item");
+                const hotelName = parent.querySelector(".hotel-name").innerText;
+                const hotelId =parent.querySelector(".hotel-name").closest(".merge-hotel-item").dataset.id
+                const eventCode = parent.querySelector(".event-tag")?.innerText || "";
+
+                const chip = document.createElement("span");
+
+                // 👉 Check if cross-event
+                if (parent.classList.contains("is-cross")) {
+                    chip.className = "merge-chip cross-chip";
+                    chip.innerText = `${hotelName} (${eventCode.replace("Event: ", "")})`;
+                } else {
+                    chip.className = "merge-chip";
+                    chip.value = hotelId;
+                    chip.innerText = hotelName;
+                }
+
+                chipsContainer.appendChild(chip);
+            });
+        }
+
+        // 👉 Initialize default selection
+        updateSelectedHotels();
+        document.getElementById("btnGenerate").style.display = "block";
+        document.getElementById("btnGenerateHotel").style.display = "none";
+    }
+
     
-  
-CREATE OR ALTER PROC rpt_TT_RmListDatesDueExcelBypass            
-    @RMNNO      int,            
-    @EMNNO      varchar(50) = NULL,            
-    @SessionID  nvarchar(128) = NULL            
-AS            
-BEGIN            
-    SET NOCOUNT ON;            
-            
-    /*Final result */            
-    SELECT            
-        CONVERT(VARCHAR(10), H.HTDTCUTOFF, 101)    AS [RL Due Date],   -- mm/dd/yyyy            
-        H.HTCDSC                                   AS [Hotel Name],             
-        E.EMCNM                                    AS [Event Name],             
-        CONVERT(VARCHAR(10), E.EMDTBEG, 101)       AS [Event Start],   -- mm/dd/yyyy            
-        CONVERT(VARCHAR(10), E.EMDTEND, 101)       AS [Event End]      -- mm/dd/yyyy      
-    FROM ICM.dbo.EVENTS AS E            
-    INNER JOIN ICM.dbo.HOTEL  AS H            
-        ON H.EMNNO = E.EMNNO            
-    WHERE           
-        -- same as Crystal: EVENTS.CUNNO = 2          
-        E.CUNNO = 2          
-        -- optional extra filter if EMNNO is passed / parsed from RMCWHERE          
-        -- AND (@EMNNO IS NULL OR E.EMNNO = @EMNNO)          
-        -- same as Crystal: HOTEL.HTDTRMLISTDUE >= CurrentDate          
-        AND (          
-               H.HTDTCUTOFF >= CONVERT(date, GETDATE())          
-            )          
-    ORDER BY H.HTDTCUTOFF, E.EMCNM+E.EMCNO;            
-END   
-  
-  GO
-  
-  
+    document.getElementById("btnGenerate").style.display = "block";
+   
+}
+
+
+//document.addEventListener('DOMContentLoaded', function () {
+
+//    document.getElementById('btnGenerate').addEventListener('click', function () {
+
+//        const hotels = document.querySelectorAll('#mergePanelWrap .merge-hotel-item');
+
+//        let selectedHotels = [];
+//        let isCrossEvent = false;
+
+//        hotels.forEach(item => {
+
+//            const checkbox = item.querySelector('input[type="checkbox"]');
+//            const isSelected = item.classList.contains('is-checked') || (checkbox && checkbox.checked);
+
+//            if (isSelected) {
+
+//                const name = item.querySelector('.hotel-name').innerText.trim();
+//                const hotelId = item.querySelector(".hotel-name").closest(".merge-hotel-item").dataset.id
+
+//                if (item.classList.contains('is-cross')) {
+//                    isCrossEvent = true;
+//                }
+
+//                let eventTag = item.querySelector('.event-tag')?.innerText || '';
+
+//                selectedHotels.push({
+//                    hotelId: hotelId,
+//                    name: name,
+//                    event: eventTag
+//                });
+//            }
+//        });
+
+//        //if (selectedHotels.length === 0) {
+//        //    alert('Please select at least one hotel');
+//        //    return;
+//        //}
+
+//        let html = '';
+
+//        // ✅ CASE 1: Only ONE hotel selected
+//        if (selectedHotels.length === 1) {
+
+//            const hotel = selectedHotels[0];
+
+//            document.getElementById('confirmModalTitle').innerText =
+//                'Run Report for One Hotel Only?';
+
+//            html = `
+//                <p>We detected other hotel versions with matching RFP IDs, but you have not selected any of them.</p>
+//                <p>You are about to generate a report for:</p>
+//                <div class="model-p"><ol>
+//                    <li><strong class="model-s" data-id="${hotel.hotelId}">${hotel.name} only.</strong></li>
+//                </ol></div>
+//                <p>Are you sure you only want to run the report for this one hotel?</p>
+//            `;
+
+//            // ❌ Hide cross-event warning
+//            document.getElementById('confirmCrossNote').style.display = 'none';
+//        }
+//        // ✅ CASE 2: Multiple hotels
+//        else {
+
+//            document.getElementById('confirmModalTitle').innerText =
+//                isCrossEvent ? 'Confirm Cross-Event Merged Report' : 'Confirm Merged Report';
+
+//            html = `<p>You have selected <strong class="model-s">${selectedHotels.length} hotels</strong> for a merged rooming list:</p><div class="model-p"><ol>`;
+
+//            selectedHotels.forEach(h => {
+//                html += `<li>
+//                            <strong class="model-s" data-id="${h.hotelId}">${h.name}</strong>
+//                            ${h.event ? `<strong class="model-e"> (${h.event})</strong>` : ''}
+//                        </li>`;
+//            });
+
+//            html += `</ol></div>`;
+
+//            // ✅ Show/hide cross-event note
+//            document.getElementById('confirmCrossNote').style.display =
+//                isCrossEvent ? 'block' : 'none';
+//        }
+
+//        // ✅ Bind content
+//        document.getElementById('confirmModalBody').innerHTML = html;
+
+//        // ✅ Show modal
+//        document.getElementById('confirmModal').style.display = 'block';
+//    });
+
+//    // Cancel
+//    document.getElementById('btnModalCancel').onclick = function () {
+//        document.getElementById('confirmModal').style.display = 'none';
+//    };
+
+//    // OK
+//    document.getElementById('btnModalOk').onclick = function () {
+//        document.getElementById('confirmModal').style.display = 'none';
+
+//        // 👉 Continue your report logic
+//    };
+
+//});
+
+document.addEventListener('DOMContentLoaded', function () {
+
+    // ✅ Row click + checkbox sync
+    document.querySelectorAll('#mergePanelWrap .merge-hotel-item').forEach(item => {
+
+        const checkbox = item.querySelector('input[type="checkbox"]');
+
+        // 👉 क्लिक on full row
+        item.addEventListener('click', function (e) {
+
+            // prevent double toggle if checkbox clicked directly
+            if (e.target.type === "checkbox") return;
+
+            checkbox.checked = !checkbox.checked;
+
+            item.classList.toggle('is-checked', checkbox.checked);
+
+            updateSelectedHotels(); // keep your existing UI sync
+        });
+
+        // 👉 direct checkbox click
+        checkbox.addEventListener('change', function () {
+            item.classList.toggle('is-checked', checkbox.checked);
+            updateSelectedHotels();
+        });
+
+    });
+
+    // ================= EXISTING CODE (UNCHANGED) =================
+
+    document.getElementById('btnGenerate').addEventListener('click', function () {
+
+        const hotels = document.querySelectorAll('#mergePanelWrap .merge-hotel-item');
+
+        let selectedHotels = [];
+        let isCrossEvent = false;
+
+        hotels.forEach(item => {
+
+            const checkbox = item.querySelector('input[type="checkbox"]');
+            const isSelected = item.classList.contains('is-checked') || (checkbox && checkbox.checked);
+
+            if (isSelected) {
+
+                const name = item.querySelector('.hotel-name').innerText.trim();
+                const hotelId = item.dataset.id;
+
+                if (item.classList.contains('is-cross')) {
+                    isCrossEvent = true;
+                }
+
+                let eventTag = item.querySelector('.event-tag')?.innerText || '';
+
+                selectedHotels.push({
+                    hotelId: hotelId,
+                    name: name,
+                    event: eventTag
+                });
+            }
+        });
+
+        let html = '';
+
+        // ✅ CASE 1: Only ONE hotel selected
+        if (selectedHotels.length === 1) {
+
+            const hotel = selectedHotels[0];
+
+            document.getElementById('confirmModalTitle').innerText =
+                'Run Report for One Hotel Only?';
+
+            html = `
+                <p>We detected other hotel versions with matching RFP IDs, but you have not selected any of them.</p>
+                <p>You are about to generate a report for:</p>
+                <div class="model-p"><ol>
+                    <li><strong class="model-s" data-id="${hotel.hotelId}">${hotel.name} only.</strong></li>
+                </ol></div>
+                <p>Are you sure you only want to run the report for this one hotel?</p>
+            `;
+
+            document.getElementById('confirmCrossNote').style.display = 'none';
+        }
+        // ✅ CASE 2: Multiple hotels
+        else {
+
+            document.getElementById('confirmModalTitle').innerText =
+                isCrossEvent ? 'Confirm Cross-Event Merged Report' : 'Confirm Merged Report';
+
+            html = `<p>You have selected <strong class="model-s">${selectedHotels.length} hotels</strong> for a merged rooming list:</p><div class="model-p"><ol>`;
+
+            selectedHotels.forEach(h => {
+                html += `<li>
+                            <strong class="model-s" data-id="${h.hotelId}">${h.name}</strong>
+                            ${h.event ? `<strong class="model-e"> (${h.event})</strong>` : ''}
+                        </li>`;
+            });
+
+            html += `</ol></div>`;
+
+            document.getElementById('confirmCrossNote').style.display =
+                isCrossEvent ? 'block' : 'none';
+        }
+
+        document.getElementById('confirmModalBody').innerHTML = html;
+        document.getElementById('confirmModal').style.display = 'block';
+    });
+
+    // Cancel
+    document.getElementById('btnModalCancel').onclick = function () {
+        document.getElementById('confirmModal').style.display = 'none';
+    };
+
+    // OK
+    document.getElementById('btnModalOk').onclick = function () {
+        document.getElementById('confirmModal').style.display = 'none';
+
+        // 👉 Continue your report logic
+    };
+
+});
+
+
+
+document.addEventListener('DOMContentLoaded', function () {
+
+    document.getElementById("btnModalOk").addEventListener("click", function () {
+
+        const ids = Array.from(document.querySelectorAll(".model-p .model-s"))
+            .map(el => el.dataset.id)
+            .filter(id => id)
+            .join(",");
+
+        
+        alert(ids);
+    });
+
+    
+
+});
+
+
+
+
+
+
+
+
