@@ -1,605 +1,465 @@
-CREATE PROCEDURE dbo.rpt_TT_BlkDetailInv                    
-/******************************************************************************************                  
--- Author      : Sankalp Mishra                 
--- Company     : Jsimple                  
--- Project     : ICM                  
--- File Name   : rpt_TT_BlkDetailInv.sql                  
--- Description : Generates hotel-wise block detail and inventory summary report                   
---               with Crystal-formula-equivalent calculations for RDLC output.                  
---                  
--- Parameters :                  
---   @EMNNO     : Event number (varchar)                  
---   @EMCNO     : Event category number (varchar)                  
---   @From/@To  : (currently unused – kept for parity)                  
---   @SessionID : Optional session tracking ID                  
-******************************************************************************************/            
-    @EMNNO     varchar(50)   = NULL,                    
-    @EMCNO     varchar(50)   = NULL,                    
-    @From      datetime      = NULL,                    
-    @To        datetime      = NULL,                    
-    @SessionID nvarchar(128) = NULL                    
-AS                    
-BEGIN                    
-    SET NOCOUNT ON;                      
-     
-    ------------------------------------------------------------            
-    -- Normalize EMNNO            
-    ------------------------------------------------------------            
-    DECLARE @EMNNO_INT INT = Cast(@EMNNO as INT);                    
-            
-    ------------------------------------------------------------            
-    -- 0) Event hotels for this event / EMCNO            
-    ------------------------------------------------------------            
-    IF OBJECT_ID('tempdb..#EventHotels') IS NOT NULL DROP TABLE #EventHotels;            
-            
-    SELECT  h.HTNNO,            
-            h.EMNNO            
-    INTO    #EventHotels            
-    FROM    dbo.HOTEL  AS h            
-    JOIN    dbo.EVENTS AS e ON e.EMNNO = h.EMNNO            
-    WHERE   (@EMNNO_INT IS NULL OR e.EMNNO = @EMNNO_INT)            
-      --AND   (@EMCNO     IS NULL OR e.EMCNO = @EMCNO);            
-            
-    ------------------------------------------------------------            
-    -- If nothing matches, still return 5 empty resultsets            
-    ------------------------------------------------------------            
-    IF NOT EXISTS (SELECT 1 FROM #EventHotels)            
-    BEGIN            
-        -- 1) Header            
-        SELECT TOP (0)            
-               EMCNM        = CAST(NULL AS varchar(100)),            
-               EMCNO        = CAST(NULL AS varchar(50)),            
-               EMDTBEG      = CAST(NULL AS varchar(50)),            
-               EMDTEND      = CAST(NULL AS varchar(50)),            
-               TotalRooms   = CAST(0 AS int),            
-               UnusedRooms  = CAST(0 AS int);            
-            
-        -- 2) HotelGroupingTable            
-        SELECT TOP (0)            
-               HTCDSC          = CAST(NULL AS varchar(100)),            
-               HTCSLENM        = CAST(NULL AS varchar(100)),            
-               HTCSLETEL       = CAST(NULL AS varchar(50)),            
-               HTCSLEEMAIL     = CAST(NULL AS varchar(100)),            
-               HTDTADDDATE     = CAST(NULL AS varchar(10)),            
-               HTDTCUTOFF      = CAST(NULL AS datetime),            
-               HTNCMPRMPER     = CAST(NULL AS int),            
-               HTNCMPRM        = CAST(NULL AS int),            
-               HTNNO           = CAST(NULL AS int),            
-               HotelDepositAmount = CAST(NULL AS varchar(20)),            
-               HotelRoomsRequested = CAST(0 AS int),            
-               HotelRoomsPickup    = CAST(0 AS int),            
-               HotelRoomsNotPicked = CAST(0 AS int);            
-            
-     -- 3) HotelWiseData            
-        SELECT TOP (0)            
-               WebCode      = CAST(NULL AS nvarchar(50)),            
-    BlockOverride= CAST(NULL AS date),            
-               TeamCutoff   = CAST(NULL AS date),            
-               TeamName     = CAST(NULL AS nvarchar(200)),            
-               GroupLeader  = CAST(NULL AS nvarchar(200)),            
-               Phone        = CAST(NULL AS nvarchar(50)),            
-        ApprovedDate = CAST(NULL AS date),            
-               [Block]      = CAST(NULL AS nvarchar(50)),            
-               RMSBlocked   = CAST(0 AS int),            
-           Pickup       = CAST(0 AS int),            
-               Cxl          = CAST(0 AS int),            
-               NotPickedup  = CAST(0 AS int),            
-               RMNIPickup   = CAST(0 AS int),            
-               HTNNO        = CAST(NULL AS int);            
-            
-        -- 4) HotelRates            
-        SELECT TOP (0)            
-               HTNNO          = CAST(NULL AS int),            
-               HotelRoomBlock = CAST(NULL AS nvarchar(4000)),            
-               [Block]        = CAST(0 AS int),            
-               PeakNightInv   = CAST(NULL AS varchar(50));            
-            
-        -- 5) Grand totals            
-        SELECT            
-            TotalRMSBlocked   = CAST(0 AS int),            
-            TotalPickup       = CAST(0 AS int),            
-            TotalNotPickedup  = CAST(0 AS int),            
-            TotalRMNIPickup   = CAST(0 AS int),            
-            GrandTotal        = CAST(0 AS int);            
-            
-        RETURN;            
-    END;            
-            
-    ------------------------------------------------------------            
-    -- 1) Block-level inventory: Maximum(...) over nights per block            
-    ------------------------------------------------------------            
-    IF OBJECT_ID('tempdb..#Blocks') IS NOT NULL DROP TABLE #Blocks;            
-            
-    ;WITH BlockInv AS            
-    (            
-        SELECT            
-            hb.HBNNO,            
-            hb.HTNNO,            
-            hb.HBNAPPROVED,            
-            hb.HBDTXLD,            
-            hb.HBCACRO,            
-            hb.HBCNO,            
-            hb.HBCORG,            
-            hb.HBCFNM,            
-            hb.HBCLNM,            
-            hb.HBCTEL,            
-            hb.HBDTAPPROVED,            
-            hb.HBOVERWRITECUTOFFDATE,            
-            hb.HBTEAMCUTOFFDATE,            
-            rc.RCCACRO,            
-            
-            ReqPerNight    = ISNULL(inv.RBNAMOUNTRESERVED,0) + ISNULL(inv.RBNADJUSTMENTS,0),            
-            PickupPerNight = ISNULL(inv.RBNAMOUNTRESERVED,0) + ISNULL(inv.RBNADJUSTMENTS,0) - ISNULL(inv.RBNREMAININGAVAILABLE,0),            
-            RemainPerNight = ISNULL(inv.RBNREMAININGAVAILABLE,0)            
-        FROM dbo.HOTELROOMBLOCKS hb            
-        JOIN #EventHotels    eh  ON eh.HTNNO = hb.HTNNO            
-        LEFT JOIN dbo.ROOMCATEGORIES          rc  ON rc.RCNNO = hb.RCNNO            
-        LEFT JOIN dbo.HOTELROOMBLOCKINVENTORY inv ON inv.HBNNO = hb.HBNNO            
-    )            
-    SELECT            
-        bi.HBNNO,            
-        bi.HTNNO,            
-        bi.HBNAPPROVED,            
-        bi.HBDTXLD,            
-        bi.HBCACRO,            
-        bi.HBCNO,            
-        bi.HBCORG,            
-        bi.HBCFNM,            
-        bi.HBCLNM,            
-        bi.HBCTEL,            
-        bi.HBDTAPPROVED,            
-        bi.HBOVERWRITECUTOFFDATE,            
-        bi.HBTEAMCUTOFFDATE,            
-        bi.RCCACRO,            
-            
-        MaxRequested = MAX(bi.ReqPerNight),            
-        MaxPickup    = MAX(bi.PickupPerNight),            
-        MaxRemain    = MAX(bi.RemainPerNight)            
-    INTO #Blocks            
-    FROM BlockInv bi            
-    GROUP BY            
-       bi.HBNNO,            
-        bi.HTNNO,            
-        bi.HBNAPPROVED,            
-        bi.HBDTXLD,            
-        bi.HBCACRO,            
-        bi.HBCNO,            
-        bi.HBCORG,            
-        bi.HBCFNM,            
-        bi.HBCLNM,            
-        bi.HBCTEL,            
-        bi.HBDTAPPROVED,           
-    bi.HBOVERWRITECUTOFFDATE,            
-        bi.HBTEAMCUTOFFDATE,            
-        bi.RCCACRO;            
-            
-    CREATE UNIQUE CLUSTERED INDEX IX_B_HBNNO ON #Blocks(HBNNO);            
-            
-    ------------------------------------------------------------            
-    -- 2) Cancelled reservations per block (CanceledCounter)            
-    ------------------------------------------------------------            
-    IF OBJECT_ID('tempdb..#BlockCxl') IS NOT NULL DROP TABLE #BlockCxl;            
-            
-    SELECT            
-        r.HBNNO,            
-        Cxl = SUM(            
-                CASE WHEN ISNULL(CONVERT(varchar(50), r.RSDTXLD), '') = '' THEN 0            
-                     ELSE 1            
-END)            
-    INTO #BlockCxl            
-    FROM dbo.RESERVATIONS r            
-    JOIN #Blocks b ON b.HBNNO = r.HBNNO            
-    GROUP BY r.HBNNO;            
-            
-    CREATE UNIQUE CLUSTERED INDEX IX_C_HBNNO ON #BlockCxl(HBNNO);            
-            
-    ------------------------------------------------------------            
-    -- 3) Room-nights per block (RMNIPickup) – Crystal #Nites logic            
-    -- #Nites:            
-    --   if HBNAPPROVED = 0 then 0            
-    --   else if RSDTXLD <> '' then 0            
-    --   else RSDTDEP - RSDTARR            
-    -- Running total in Crystal is effectively SUM(#Nites) per block.            
-    ------------------------------------------------------------            
-    IF OBJECT_ID('tempdb..#BlkRmNites') IS NOT NULL DROP TABLE #BlkRmNites;            
-            
-    SELECT            
-        r.HBNNO,            
-        RmNitesPickup =            
-            SUM(                  CASE             
-                    WHEN b.HBNAPPROVED = 0 THEN 0            
-                    WHEN ISNULL(CONVERT(varchar(50), r.RSDTXLD), '') <> '' THEN 0            
-                    ELSE DATEDIFF(DAY, r.RSDTARR, r.RSDTDEP)            
-                END            
-            )            
-    INTO #BlkRmNites            
-    FROM dbo.RESERVATIONS r            
-    JOIN #Blocks b ON b.HBNNO = r.HBNNO            
-    GROUP BY r.HBNNO;            
-            
-    CREATE UNIQUE CLUSTERED INDEX IX_RN_HBNNO ON #BlkRmNites(HBNNO);            
-            
-    ------------------------------------------------------------            
-    -- 4) Apply Crystal formulas per block (one row per HBNNO)            
-    ------------------------------------------------------------            
-    IF OBJECT_ID('tempdb..#BlockCalc') IS NOT NULL DROP TABLE #BlockCalc;            
-            
-    SELECT            
-        b.*,            
-            
-        CxlCount =            
-            ISNULL(c.Cxl, 0),            
-            
-        CancelledBlock =            
-            CASE WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') = '' THEN 'NotXld'            
-                 ELSE 'Xld'            
-            END,            
-            
-        -- Requested-From-Orig  (@Requested-From-Orig)            
-        RequestedFromOrig =            
-            CASE            
-                WHEN b.HBNAPPROVED = 0 THEN 0            
-                WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') <> '' THEN 0            
-                ELSE b.MaxRequested            
-            END,            
-            
-        -- BlkPickup  (@BlkPickup)            
-        BlkPickup =            
-            CASE            
-                WHEN b.HBNAPPROVED = 0 THEN 0            
-                WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') <> '' THEN 0            
-                ELSE b.MaxPickup            
-            END,            
-            
-        -- Remaining at peak night (old NotPickedup logic – keep for reference)            
-        RemainAtPeak =            
-            CASE            
-                WHEN b.HBNAPPROVED = 0 THEN 0            
-                WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') <> '' THEN 0            
-                ELSE b.MaxRemain            
-            END,            
-            
-        -- Block NotPickedUp            
-        -- BlockNotPickedup = Maximum(@Requested-From-Orig, @SubBlkSort)            
-        -- - Maximum(@BlkPickup, @SubBlkSort)            
-        BlockNotPickedUp =            
-            CASE            
-                WHEN b.HBNAPPROVED = 0 THEN 0            
-                WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') <> '' THEN 0            
-                ELSE b.MaxRequested - b.MaxPickup            
-            END,            
-            
-        -- Room-nights in pickup (RMNIPickup column)            
-        RmNitesPickup =            
-            ISNULL(n.RmNitesPickup, 0),        
-     CrystalBlkGroupKey =        
-        CASE         
-            WHEN NULLIF(LTRIM(RTRIM(b.HBCACRO)), '') IS NULL        
-                THEN ISNULL(CONVERT(nvarchar(50), b.HBCNO), '')        
-                     + RIGHT('0000000000' + CONVERT(varchar(10), b.HBNNO), 10)        
-            ELSE LTRIM(RTRIM(b.HBCACRO))        
-                     + RIGHT('0000000000' + CONVERT(varchar(10), b.HBNNO), 10)        
-        END        
-    INTO #BlockCalc            
-    FROM #Blocks b            
-    LEFT JOIN #BlockCxl     c ON c.HBNNO = b.HBNNO            
-    LEFT JOIN #BlkRmNites   n ON n.HBNNO = b.HBNNO;            
-            
-    CREATE UNIQUE CLUSTERED INDEX IX_BC_HBNNO ON #BlockCalc(HBNNO);            
-            
-    ------------------------------------------------------------            
-    -- 5) HotelWiseData: detail rows for RDLC            
-    --    Column mapping to Crystal table:            
-    --      RMSBlocked   -> @Requested-From-Orig            
-    --      Pickup       -> @BlkPickup            
-    --      NotPickedup  -> BlockNotPickedup  (NOT RemainAtPeak)            
-    --      RMNIPickup   -> SUM(#Nites)            
-    ------------------------------------------------------------            
-    IF OBJECT_ID('tempdb..#HotelWiseData') IS NOT NULL DROP TABLE #HotelWiseData;            
-            
-    SELECT            
-        WebCode       = NULLIF(LTRIM(RTRIM(bc.HBCACRO)), ''),            
-        BlockOverride = CONVERT(date, bc.HBOVERWRITECUTOFFDATE),            
-        TeamCutoff    = CONVERT(date, bc.HBTEAMCUTOFFDATE),            
-        TeamName      = NULLIF(LTRIM(RTRIM(bc.HBCORG)), ''),            
-        GroupLeader   = LTRIM(RTRIM(ISNULL(bc.HBCFNM,'') + ' ' + ISNULL(bc.HBCLNM,''))),            
-        Phone         = bc.HBCTEL,            
-        ApprovedDate  = CONVERT(date, bc.HBDTAPPROVED),            
-        [Block]       = bc.RCCACRO,            
-            
-        RMSBlocked    = bc.RequestedFromOrig,            
-        Pickup        = bc.BlkPickup,            
-        Cxl           = bc.CxlCount,            
-        NotPickedup   = bc.BlockNotPickedUp,   -- << Crystal BlockNotPickedup            
-        RMNIPickup    = bc.RmNitesPickup,      -- << SUM(#Nites)            
-  CrystalBlkGroupKey = bc.CrystalBlkGroupKey,        
-        HTNNO         = bc.HTNNO            
-    INTO #HotelWiseData            
-    FROM #BlockCalc bc        
- WHERE NOT        
-(        
-    LOWER(COALESCE(LTRIM(RTRIM(bc.HBCACRO)), '')) = 'request'        
-    AND bc.HBOVERWRITECUTOFFDATE IS NULL        
-    AND ISNULL(bc.RequestedFromOrig, 0) = 0        
-    AND ISNULL(bc.BlkPickup, 0) = 0        
-    AND ISNULL(bc.CxlCount, 0) = 0        
-    AND ISNULL(bc.BlockNotPickedUp, 0) = 0        
-    AND ISNULL(bc.RmNitesPickup, 0) = 0        
-);        
-            
-    CREATE NONCLUSTERED INDEX IX_HWD_HTNNO ON #HotelWiseData(HTNNO);            
-            
-     ------------------------------------------------------------            
-    -- 5a) Ensure every hotel appears at least once in #HotelWiseData            
-    --     Even if there are no blocks/reservations for that hotel,            
-    --     insert a single "blank" row with zeros.            
-    ------------------------------------------------------------            
-    INSERT INTO #HotelWiseData            
-    (            
-        WebCode,            
-        BlockOverride,            
-        TeamCutoff,            
-        TeamName,            
-        GroupLeader,            
-        Phone,            
-        ApprovedDate,            
-        [Block],            
-        RMSBlocked,            
-        Pickup,            
-        Cxl,            
-        NotPickedup,       
-        RMNIPickup,            
-        HTNNO ,        
-  CrystalBlkGroupKey         
-    )            
-    SELECT            
-        WebCode       = NULL,            
-        BlockOverride = NULL,            
-        TeamCutoff    = NULL,            
-        TeamName      = NULL,            
-        GroupLeader   = NULL,            
-        Phone         = NULL,            
-        ApprovedDate  = NULL,            
-       [Block]       = NULL,            
-        RMSBlocked    = 0,            
-        Pickup        = 0,            
-        Cxl           = 0,            
-        NotPickedup   = 0,            
-        RMNIPickup    = 0,            
-        HTNNO         = eh.HTNNO,        
-  NULL        
-    FROM #EventHotels eh            
-    LEFT JOIN #HotelWiseData hwd ON hwd.HTNNO = eh.HTNNO            
-    WHERE hwd.HTNNO IS NULL;            
-            
-            
-    ------------------------------------------------------------            
-    -- 6) Event totals from HotelWiseData (Crystal-style)            
-    ------------------------------------------------------------            
-    DECLARE @TotalRMSBlocked   INT = 0,            
-            @TotalPickup       INT = 0,            
-            @TotalNotPickedup  INT = 0,            
-            @TotalRMNIPickup   INT = 0,            
-            @GrandTotal        INT = 0,            
-            @TotalRooms        INT = 0,   -- from HOTELINVENTORY peak logic            
-            @UnusedRooms       INT = 0;   -- TotalRooms - TotalPickup            
-            
-    SELECT            
-        @TotalRMSBlocked   = ISNULL(SUM(RMSBlocked),0),            
-        @TotalPickup       = ISNULL(SUM(Pickup),0),            
-        @TotalNotPickedup  = ISNULL(SUM(NotPickedup),0),            
-        @TotalRMNIPickup   = ISNULL(SUM(RMNIPickup),0)            
-    FROM #HotelWiseData;            
-            
-    SET @GrandTotal = @TotalRMSBlocked;            
-            
-    ------------------------------------------------------------            
-    -- 7) Build HotelRatesAgg once (original subreport SQL) and            
-    --    use PeakInv sum for TotalRooms / UnusedRooms.            
-    ------------------------------------------------------------            
-    IF OBJECT_ID('tempdb..#HotelRatesAgg') IS NOT NULL DROP TABLE #HotelRatesAgg;            
-            
-    ;WITH RateBase AS                
-    (                
-        SELECT                
-            h.HTNNO,                
-            rc.RCCACRO,                
-            hrc.HRCBLOCKREQUEST,                
-            hrt.HCNCOST,                
-            hi.HINAMOUNTRESERVED                
-        FROM #EventHotels eh                
-        JOIN dbo.HOTEL               AS h   ON h.HTNNO = eh.HTNNO                
-        JOIN dbo.EVENTS              AS e   ON e.EMNNO = h.EMNNO                
-        JOIN dbo.HOTELROOMCATEGORIES AS hrc ON h.HTNNO = hrc.HTNNO                
-        JOIN dbo.HOTELINVENTORY      AS hi  ON hrc.HRNNO = hi.HRNNO                
-        JOIN dbo.ROOMCATEGORIES      AS rc  ON hrc.RCNNO = rc.RCNNO                
-        JOIN dbo.HOTELROOMTYPECOSTS  AS hrt ON hi.HINNO = hrt.HINNO                
-        WHERE (@EMNNO_INT IS NULL OR e.EMNNO = @EMNNO_INT)                
-          --AND (@EMCNO     IS NULL OR e.EMCNO = @EMCNO)                
-    ),                
-    Agg AS             
-    (            
-        SELECT                
-            HTNNO,                
-            RCCACRO,                
-            HRCBLOCKREQUEST,                
-            TotalHCNCost = MAX(ISNULL(HCNCOST,0)),                
-            PeakInv      = MAX(ISNULL(HINAMOUNTRESERVED,0))                
-        FROM RateBase                
-        GROUP BY HTNNO, RCCACRO, HRCBLOCKREQUEST                
-    )                
-    SELECT *            
-    INTO #HotelRatesAgg            
-    FROM Agg;            
-            
-    -- TotalRooms = sum of PeakInv across all hotels/categories            
-    SELECT @TotalRooms = ISNULL(SUM(PeakInv), 0)            
-    FROM #HotelRatesAgg;            
-            
-    -- UnusedRooms = TotalRooms - total pickup (block-based pickup)            
-    SET @UnusedRooms = @TotalRooms - ISNULL(@TotalPickup, 0);            
-            
-    ------------------------------------------------------------            
-    -- 8) Resultset #1 – Header (Event info + TotalRooms/UnusedRooms)            
-    ------------------------------------------------------------            
-    SELECT TOP (1)            
-           e.EMCNM,            
-           e.EMCNO,            
-           EMDTBEG =            
-               DATENAME(WEEKDAY, e.EMDTBEG) + ', ' + CONVERT(varchar(10), e.EMDTBEG, 101) +            
-               ' - ' +            
-               DATENAME(WEEKDAY, e.EMDTEND) + ', ' + CONVERT(varchar(10), e.EMDTEND, 101),            
-           EMDTEND   = CONVERT(varchar(10), e.EMDTEND, 101),            
-           TotalRooms  = @TotalRooms,            
-           UnusedRooms = @UnusedRooms            
-    FROM dbo.EVENTS e            
-    WHERE (@EMNNO_INT IS NULL OR e.EMNNO = @EMNNO_INT)            
-      --AND (@EMCNO     IS NULL OR e.EMCNO = @EMCNO)            
-    ORDER BY e.EMNNO;            
-            
-    ------------------------------------------------------------        
- -- 9) Resultset #2 – HotelGroupingTable  (FIXED)        
- ------------------------------------------------------------        
+using AspNetCore.Reporting; // if you use this renderer
+using EventManagerWeb.Areas.Admin.Models;
+using EventManagerWeb.Filter;
+using EventManagerWeb.Repository.IRepository;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Configuration;
+using System;
+using System.Collections.Generic;
+using System.Data;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Text;
+using System.Threading.Tasks;
+
+namespace EventManagerWeb.Areas.Admin.Controllers
+{
+	[AuthorizationFilter]
+	//[Area("Admin")]
+	public class ReportHT152Controller : Controller
+	{
+		private readonly IReportHT152Repository _repo;
+		private readonly IWebHostEnvironment _env;
+        private readonly IHotelAdminRepository _eHRepo;
+        private readonly IRoomingListRepository _eRLRepo;
+        static ReportHT152Controller()
+		{
+			// Required by RDLC renderer in .NET Core for some encodings
+			Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+		}
+
+		public ReportHT152Controller(IReportHT152Repository repo, IWebHostEnvironment env, IHotelAdminRepository eHRepo, IRoomingListRepository eRLRepo)
+		{
+			_repo = repo;
+			_env = env;
+            _eHRepo = eHRepo;
+            _eRLRepo= eRLRepo;
+        }
+
+		[HttpGet]
+		public async Task<IActionResult> Index()
+		{
+			var EMCNO = HttpContext.Session.GetString("EventId") ?? "";
+
+			var vm = new ReportGroupsHT152Vm
+			{
+				EMCNO = EMCNO,
+				SelectedHotelId = "",
+				Comments = ""
+			};
+
+			var hotels = await _repo.BindHotelList(EMCNO);
+			vm.Hotels.Clear();
+			vm.Hotels.Add(new SelectItemVm("", "-- Select Hotel --"));
+			if (hotels != null) vm.Hotels.AddRange(hotels);
+
+			vm.EnsureDefaults();
+			return View(vm);
+		}
+
+		// ✅ Called when hotel changes (auto bind From/To)
+		[HttpPost]
+		public async Task<IActionResult> GetDefaultFromTo([FromBody] Ht152DefaultFromToRequestVm req)
+		{
+			req.EMCNO = HttpContext.Session.GetString("EventId") ?? req.EMCNO;
+			var USNNO = HttpContext.Session.GetString("USNNO") ?? "";
+
+			// 1) existing call to API (gets From/To + EMNNO resolved)
+			var result = await _repo.GetDefaultFromTo(req);
+			if (result == null) return Ok(null);
+
+            //  OVERRIDE only TO values with current datetime
+            if (result != null)
+            {
+                var now = DateTime.Now;
+
+                result.ToDate = now.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+
+                var hour12 = now.Hour % 12;
+                if (hour12 == 0) hour12 = 12;
+
+                result.ToHour = hour12.ToString("00");
+                result.ToMin = now.Minute.ToString("00");
+                result.ToAmPm = now.Hour >= 12 ? "PM" : "AM";
+            }
+
+
+            // 2) ✅ also fetch history for this hotel
+            var history = await _repo.GetExportReportList(new ApiExportHistoryRequest
+			{
+				USNNO = USNNO,
+				EMNNO = result.EMNNO,
+				HTNNO = req.HotelId
+			});
+
+			result.History = history ?? new List<ReportRowVm>();
+
+			return Ok(result);
+		}
+
+
+
+        // ✅ Main: Generate New/Changed/Canceled, save pdf, insert EXPORT_REPORT_LIST, return history
+        [HttpPost]
+        public async Task<IActionResult> Process([FromBody] Ht152ProcessRequestVm req)
+        {
+            var EMCNO = HttpContext.Session.GetString("EventId") ?? "";
+            var USNNO = HttpContext.Session.GetString("USNNO") ?? ""; // adjust if your session key differs
+            var currentDate = DateTime.Now;
+            Guid UniqueId = Guid.NewGuid();
+
+            if (req.HotelId <= 0) return BadRequest("Hotel required");
+
+            var actions = new List<string>();
+            if (req.ChkNew) actions.Add("New");
+            if (req.ChkChanged) actions.Add("Changed");
+            if (req.ChkCanceled) actions.Add("Canceled");
+            if (actions.Count == 0) return BadRequest("Select at least one report type");
+
+            cls_HotelInfo obj = new cls_HotelInfo();
+            Hotel_Import_RFPID obj_root = new Hotel_Import_RFPID();
+            HotelApiDetail obj_details = new HotelApiDetail();
+            obj.HTNNO = req.HotelId;
+            var hotelDetails = await _eHRepo.GetHotelInfoList(obj);
+
+            string RFPID = hotelDetails[0].HTCRFP_ID;
+            //string RFPID = "720885";
+
+            var config = new ConfigurationBuilder().SetBasePath(Directory.GetCurrentDirectory()).AddJsonFile("appsettings.json").Build();
+            var url = Convert.ToString(config["RoomingHotelImportUrl"]);
+            var Token = Convert.ToString(config["RoomingHotelToken"]);
+            var Email = Convert.ToString(config["HotelEmail"]);
+            var Password = Convert.ToString(config["HotelPassword"]);
+            if (RFPID.Length > 0)
+            {
+                obj_root = await _eHRepo.callurl1(url + RFPID, Token, Email, Password);
+                if (obj_root == null)
+                {
+                }
+                else
+                {
+                    obj_details.HTNNO = req.HotelId;
+                    obj_details.EMCNOCode = EMCNO;
+                    obj_details.RFPID = obj_root.Response.RFPID;
+                    obj_details.HRCEmail = obj_root.Response.RoomingListCoordinatorEmail;
+                    obj_details.HotelSalesManagerEmail = obj_root.Response.HotelSalesManagerEmail;
+                    obj_details.Name = obj_root.Response.PropertyRoomListCoordinatorName;
+                    obj_details.Phone = obj_root.Response.PropertyRoomListCoordinatorPhone;
+                    var RoomingListDetails = await _eRLRepo.InsertUpdateHT152Hotel(obj_details);
+                }
+            }
+
+
+            HttpContextAccessor _httpContextAccessor = new HttpContextAccessor();
+            var context = _httpContextAccessor.HttpContext;
+
+            string ipAddress =
+                context?.Request.Headers["X-Forwarded-For"].FirstOrDefault()
+                ?? context?.Connection.RemoteIpAddress?.ToString();
+
+            if (!string.IsNullOrEmpty(ipAddress))
+            {
+                ipAddress = ipAddress.Split(',')[0].Trim();
+            }
+
+
+            var generated = new List<Ht152GeneratedItemVm>();
+
+            int resolvedEmnno = 0;
+            string htcacro = "";
+
+            foreach (var action in actions)
+            {
+                var apiReq = new ApiHt152ReportDataRequest
+                {
+                    Action = action,
+                    EMCNO = EMCNO,
+                    EMNNO = resolvedEmnno,     // 0 on first call; API can resolve from EMCNO
+                    HTNNO = req.HotelId,
+                    REPORTID = req.REPORTID,   // pass your legacy reportId if you have
+                    USER = USNNO,
+                    CurrentDate = currentDate,
+
+                    FromDate = req.FromDate,
+                    ToDate = req.ToDate,
+                    FrmHour = req.FrmHour,
+                    FrmMin = req.FrmMin,
+                    FrmAmPm = req.FrmAmPm,
+                    ToHour = req.ToHour,
+                    ToMin = req.ToMin,
+                    ToAmPm = req.ToAmPm,
+                    UNIQUEId = UniqueId,
+                    IPAddress= ipAddress
+                };
+
+                var apiResp = await _repo.GetReportData(apiReq);
+                if (apiResp == null) continue;
+
+                resolvedEmnno = apiResp.EMNNO;
+                htcacro = apiResp.HTCACRO;
+
+                // convert API rows -> DataTable for RDLC
+                var dt = ToDataTable(apiResp.Rows);
+
+                // pick RDLC + dataset name same as legacy
+                var (rdlcName, dsName) = action switch
+                {
+                    "New" => ("HT152_New.rdlc", "NewDataSet"),
+                    "Changed" => ("HT152_Changed.rdlc", "ChangedDataSet"),
+                    "Canceled" => ("HT152_Canceled.rdlc", "CanceledDataSet"),
+                    _ => throw new ArgumentOutOfRangeException()
+                };
+
+                // Adjust this path to where you store RDLC in Web project
+                var rdlcPath = Path.Combine(_env.ContentRootPath, "Forms", "Reports", rdlcName);
+
+                // legacy parameters dateFrom/dateTo
+                var fromDt = BuildDateTime(req.FromDate, req.FrmHour, req.FrmMin, req.FrmAmPm);
+                var toDt = BuildDateTime(req.ToDate, req.ToHour, req.ToMin, req.ToAmPm);
+
+                //var pdfBytes = RenderPdf_AspNetCoreReporting(rdlcPath, dsName, dt,
+                //    new Dictionary<string, string>
+                //    {
+                //	    ["dateFrom"] = fromDt.ToString("MM/dd/yyyy HH:mm"),
+                //	    ["dateTo"] = toDt.ToString("MM/dd/yyyy HH:mm")
+                //    });
+
+                // save to wwwroot/Forms/Reports/ReportsFolder (so url works)
+                var stamp = currentDate.ToString("MM-dd-yyyy HH-mm-ss");
+                var fileName = $"{EMCNO}_{htcacro}_{action}_{stamp} {req.ToAmPm}.pdf";
+                var relUrl = $"/Forms/Reports/ReportsFolder/{fileName}";
+
+                var folder = Path.Combine(_env.WebRootPath, "Forms", "Reports", "ReportsFolder");
+                Directory.CreateDirectory(folder);
+
+                var physicalPath = Path.Combine(folder, fileName);
+                //	await System.IO.File.WriteAllBytesAsync(physicalPath, pdfBytes);
+
+                // insert EXPORT_REPORT_LIST (same as legacy Global.InsertReportList)
+                await _repo.InsertReportList(new ApiInsertReportListRequest
+                {
+                    USNNO = USNNO,
+                    EMNNO = resolvedEmnno,
+                    HTNNO = req.HotelId,
+                    RPTURL = relUrl,          // store URL, not physical path
+                    RPTTYPE = action,
+                    CURRENTDATE = currentDate,
+                    UNIQUEId = UniqueId
+                });
+
+                generated.Add(new Ht152GeneratedItemVm
+                {
+                    Type = action,
+                    Url = relUrl,
+                    FileName = fileName
+                });
+            }
+
+            // refresh history list
+            var history = await _repo.GetExportReportList(new ApiExportHistoryRequest
+            {
+                USNNO = USNNO,
+                EMNNO = resolvedEmnno,
+                HTNNO = req.HotelId
+            });
+
+            return Ok(new { generated, history });
+        }
+
+
+        // ---------------- helpers ----------------
+
+        private static DateTime BuildDateTime(string mmddyyyy, string hour, string min, string ampm)
+		{
+			var d = DateTime.ParseExact(mmddyyyy, "MM/dd/yyyy", CultureInfo.InvariantCulture);
+
+			int h = int.Parse(hour);
+			int m = int.Parse(min);
+
+			// same legacy conversion
+			if (ampm == "PM" && h != 12) h += 12;
+			if (ampm == "AM" && h == 12) h = 0;
+
+			return new DateTime(d.Year, d.Month, d.Day, h, m, 0);
+		}
+
+		private static DataTable ToDataTable(List<Dictionary<string, object?>> rows)
+		{
+			var dt = new DataTable();
+			if (rows == null || rows.Count == 0) return dt;
+
+			// columns
+			foreach (var col in rows[0].Keys)
+				dt.Columns.Add(col);
+
+			// rows
+			foreach (var r in rows)
+			{
+				var dr = dt.NewRow();
+				foreach (var kv in r)
+					dr[kv.Key] = kv.Value ?? DBNull.Value;
+
+				dt.Rows.Add(dr);
+			}
+			return dt;
+		}
+
+        // ✅ RDLC PDF renderer (AspNetCore.Reporting)
+        //private static byte[] RenderPdf_AspNetCoreReporting(string rdlcPath, string dataSourceName, DataTable dt, Dictionary<string, string> parameters)
+        //{
+        //	var local = new LocalReport(rdlcPath);
+        //	local.AddDataSource(dataSourceName, dt);
+
+        //	var result = local.Execute(RenderType.Pdf, 1, parameters, out string mimeType);
+        //	return result.MainStream;
+        //}
+
+
+        [HttpPost]
+        public async Task<IActionResult> HotelDetailsWithRFP([FromBody] HotelRequest obj)
+        {
+
+            var RoomingListDetails = await _repo.HotelDetailsWithRFP(obj);
+            return Ok(RoomingListDetails);
+        }
+    }
+}
+
+
+
+
+Models
+
+using System;
+using System.Collections.Generic;
+
+namespace EventManagerWeb.Areas.Admin.Models
+{
+	public class ApiHt152ReportDataRequest
+	{
+		public string Action { get; set; } = ""; // New/Changed/Canceled
+		public string EMCNO { get; set; } = "";
+		public int EMNNO { get; set; } = 0;
+		public int HTNNO { get; set; }
+		public int REPORTID { get; set; } = 0;
+		public string USER { get; set; } = "";
+		public DateTime CurrentDate { get; set; }
+
+		// legacy UI fields
+		public string FromDate { get; set; } = "";
+		public string ToDate { get; set; } = "";
+		public string FrmHour { get; set; } = "12";
+		public string FrmMin { get; set; } = "00";
+		public string FrmAmPm { get; set; } = "AM";
+		public string ToHour { get; set; } = "12";
+		public string ToMin { get; set; } = "00";
+		public string ToAmPm { get; set; } = "AM";
+		public Guid UNIQUEId { get; set; }
+		public string IPAddress { get; set; }
+	}
+
+	public class ApiHt152ReportDataResponse
+	{
+		public int EMNNO { get; set; }
+		public string EMCNO { get; set; } = "";
+		public string HTCACRO { get; set; } = "";
+		public List<Dictionary<string, object?>> Rows { get; set; } = new();
+	}
+
+	public class ApiInsertReportListRequest
+	{
+		public string USNNO { get; set; } = "";
+		public int EMNNO { get; set; }
+		public int HTNNO { get; set; }
+		public string RPTURL { get; set; } = "";
+		public string RPTTYPE { get; set; } = ""; // New/Changed/Canceled
+		public DateTime CURRENTDATE { get; set; }
+		public Guid UNIQUEId { get; set; }
+	}
+
+	public class ApiExportHistoryRequest
+	{
+		public string USNNO { get; set; } = "";
+		public int EMNNO { get; set; }
+		public int HTNNO { get; set; }
+	}
+}
+
+
+
+
+another model
+
+using System;
+using System.Collections.Generic;
+
+namespace EventManagerWeb.Areas.Admin.Models
+{
+	public class Ht152DefaultFromToRequestVm
+	{
+		public string EMCNO { get; set; } = "";
+		public int HotelId { get; set; }   // HTNNO
+		public int EMNNO { get; set; } = 0; // optional (API can resolve via EMCNO)
+	}
+
+	public class Ht152DefaultFromToResponseVm
+	{
+		public int EMNNO { get; set; }
+		public string FromDate { get; set; } = ""; // MM/dd/yyyy
+		public string ToDate { get; set; } = "";   // MM/dd/yyyy
+		public string FrmHour { get; set; } = "12";
+		public string FrmMin { get; set; } = "00";
+		public string FrmAmPm { get; set; } = "AM";
+		public string ToHour { get; set; } = "12";
+		public string ToMin { get; set; } = "00";
+		public string ToAmPm { get; set; } = "AM";
+		public string CurrentDate { get; set; } = "";
+		public List<ReportRowVm> History { get; set; } = new List<ReportRowVm>();
+	}
+
+	public class Ht152ProcessRequestVm
+	{
+		public int HotelId { get; set; }
+		public string FromDate { get; set; } = "";
+		public string ToDate { get; set; } = "";
+
+		public string FrmHour { get; set; } = "12";
+		public string FrmMin { get; set; } = "00";
+		public string FrmAmPm { get; set; } = "AM";
+
+		public string ToHour { get; set; } = "12";
+		public string ToMin { get; set; } = "00";
+		public string ToAmPm { get; set; } = "AM";
+
+		public bool ChkNew { get; set; }
+		public bool ChkChanged { get; set; }
+		public bool ChkCanceled { get; set; }
+
+		public int REPORTID { get; set; } = 0; // if you have legacy REPORTID, pass it; else keep 0
+	}
+
+	public class Ht152GeneratedItemVm
+	{
+		public string Type { get; set; } = "";   // New/Changed/Canceled
+		public string Url { get; set; } = "";    // /Forms/Reports/ReportsFolder/xxx.pdf
+		public string FileName { get; set; } = "";
+	}
+
+    public class HotelWithREF
+    {
+        public string HTCRFPID { get; set; }
+        public int HTNNO { get; set; }
+        public string HTCDSC { get; set; }
+        public int EMNNO { get; set; }
+        public string EMCNO { get; set; } 
+    }
+    public class HotelRequest
+    {
+        public int HotelId { get; set; }
         
- ;WITH HotelBase AS        
- (        
-  SELECT DISTINCT        
-   HTNNO,        
-   HTCDSC,        
-   HTCSLENM,        
-   HTCSLETEL,        
-   HTCSLEEMAIL,        
-   HTDTADDDATE,        
-   HTDTCUTOFF,        
-   HTNCMPRMPER,        
-   HTNCMPRM,        
-   HTCACCTYPE        
-  FROM dbo.HOTEL        
- )        
- SELECT        
-  h.HTCDSC,        
-  h.HTCSLENM,        
-  h.HTCSLETEL,        
-  h.HTCSLEEMAIL,        
-  HTDTADDDATE = CONVERT(varchar(10), h.HTDTADDDATE, 101),        
-  h.HTDTCUTOFF,        
-  h.HTNCMPRMPER,        
-  h.HTNCMPRM,        
-  h.HTNNO,        
-  -- Robust per-hotel deposit label        
-  HotelDepositAmount =        
-   MAX(CASE        
-     WHEN UPPER(LTRIM(RTRIM(ISNULL(h.HTCACCTYPE, '')))) = 'DA'        
-      THEN 'DEPOSIT HOTEL'        
-     ELSE ''        
-    END),        
-        
-  HotelRoomsRequested = ISNULL(SUM(hwd.RMSBlocked),0),        
-  HotelRoomsPickup    = ISNULL(SUM(hwd.Pickup),0),        
-  HotelRoomsNotPicked = ISNULL(SUM(hwd.NotPickedup),0)        
-        
- FROM HotelBase h        
- JOIN #EventHotels eh ON eh.HTNNO = h.HTNNO        
- LEFT JOIN #HotelWiseData hwd ON hwd.HTNNO = h.HTNNO        
-        
- GROUP BY        
-  h.HTCDSC,        
-  h.HTCSLENM,        
-  h.HTCSLETEL,        
-  h.HTCSLEEMAIL,        
-  h.HTDTADDDATE,        
-  h.HTDTCUTOFF,        
-  h.HTNCMPRMPER,        
-  h.HTNCMPRM,        
-  h.HTNNO        
-        
- ORDER BY h.HTCDSC;        
-        
-            
-    ------------------------------------------------------------            
-    -- 10) Resultset #3 – HotelWiseData (detail rows)            
-    ------------------------------------------------------------            
-    SELECT            
-        WebCode,            
-        BlockOverride,            
-        TeamCutoff,            
-        TeamName,            
-        GroupLeader,            
-        Phone,            
-        ApprovedDate,            
-        [Block],            
-        RMSBlocked,            
-        Pickup,            
-   Cxl,            
-        NotPickedup,            
-        RMNIPickup,            
-        HTNNO            
-    FROM #HotelWiseData         
-   ORDER BY         
-    --HTNNO,        
-    CrystalBlkGroupKey ASC;        
-   --- TeamName,        
-   -- WebCode,        
-   -- [Block];        
-         
-            
-    ------------------------------------------------------------            
-    -- 11) Resultset #4 – HotelRates (subreport dataset)            
-    ------------------------------------------------------------            
-  SELECT                
-    a.HTNNO,                
-        
-   HotelRoomBlock =        
-    CAST(        
-          '<b>' + a.RCCACRO + ': '         
-          + CONVERT(varchar(20), CAST(a.TotalHCNCost AS decimal(18,2)))         
-          + '</b>'        
-          + CASE                
-                WHEN a.HRCBLOCKREQUEST IS NOT NULL                
-                     AND LTRIM(RTRIM(a.HRCBLOCKREQUEST)) <> ''                
-                     AND UPPER(LTRIM(RTRIM(a.HRCBLOCKREQUEST))) <> 'NONE'                
-                THEN '<br/><i>' + a.HRCBLOCKREQUEST + '</i>'                  
-                ELSE ''                
-            END        
-         AS nvarchar(4000)        
-    ),        
-        
-    [Block]      = CAST(0 AS int),                    
-   PeakNightInv =        
-    CAST(        
-        'Peak Night Inv: ' + CONVERT(varchar(20), a.PeakInv)        
-        + CASE        
-            WHEN a.HRCBLOCKREQUEST IS NOT NULL        
-                 AND LTRIM(RTRIM(a.HRCBLOCKREQUEST)) <> ''        
-                 AND UPPER(LTRIM(RTRIM(a.HRCBLOCKREQUEST))) <> 'NONE'        
-            THEN '<br/>&nbsp;'        
-            ELSE ''        
-          END        
-        AS nvarchar(4000)        
-    )        
-        
-FROM #HotelRatesAgg a                
-ORDER BY a.HTNNO, a.RCCACRO;         
-                   
-            
-    ------------------------------------------------------------            
-    -- 12) Resultset #5 – Grand totals for Event Totals row            
-    ------------------------------------------------------------            
-    SELECT            
-        TotalRMSBlocked   = @TotalRMSBlocked,            
-        TotalPickup       = @TotalPickup,            
-        TotalNotPickedup  = @TotalNotPickedup,            
-        TotalRMNIPickup   = @TotalRMNIPickup,            
-        GrandTotal        = @GrandTotal;            
-            
-    ------------------------------------------------------------            
-    -- Cleanup            
-    ------------------------------------------------------------            
-    DROP TABLE #HotelWiseData;            
-    DROP TABLE #BlockCalc;            
-    DROP TABLE #BlkRmNites;            
-    DROP TABLE #BlockCxl;            
-    DROP TABLE #Blocks;            
-    DROP TABLE #HotelRatesAgg;            
-    DROP TABLE #EventHotels;            
-END; 
+    }
+}
