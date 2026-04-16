@@ -1,991 +1,605 @@
-@model EventManagerWeb.Areas.Admin.Models.ReportGroupsHT152Vm
-
-@{
-     ViewData["Title"] = "Report Groups - HT152";
-     Layout = null;
-     var selectedHotelId = Model?.SelectedHotelId ?? "";
-
-     var fromDate = string.IsNullOrWhiteSpace(Model?.FromDate) ? "12/01/2025" : Model.FromDate;
-     var toDate = string.IsNullOrWhiteSpace(Model?.ToDate) ? "12/24/2025" : Model.ToDate;
-
-     var comments = Model?.Comments ?? "Sample comments...";
-
-     var frmHour = string.IsNullOrWhiteSpace(Model?.FrmHour) ? "10" : Model.FrmHour;
-     var frmMin = string.IsNullOrWhiteSpace(Model?.FrmMin) ? "00" : Model.FrmMin;
-     var frmAmPm = string.IsNullOrWhiteSpace(Model?.FrmAmPm) ? "AM" : Model.FrmAmPm;
-
-     var toHour = string.IsNullOrWhiteSpace(Model?.ToHour) ? "12" : Model.ToHour;
-     var toMin = string.IsNullOrWhiteSpace(Model?.ToMin) ? "30" : Model.ToMin;
-     var toAmPm = string.IsNullOrWhiteSpace(Model?.ToAmPm) ? "PM" : Model.ToAmPm;
-
-     var chkNew = Model?.ChkNew ?? true;
-     var chkChanged = Model?.ChkChanged ?? true;
-     // var chkCanceled = Model?.ChkCanceled ?? false;
-	 var chkCanceled = true;
-	 
-}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-
-
-<link href="~/css/ht152.css" rel="stylesheet" />
-<script src="~/js/admin/ht152.js"></script>
-<div class="ht152-page">
-     <div class="ht152-frame">
-          <form id="frmHT152" novalidate>
-               <div class="ht152-header">
-                    <div class="ht152-title">
-                         <h1>Rooming List Report: HT152</h1>
-                    </div>
-
-                    <div class="ht152-header-right">
-                         <div class="ht152-badge">REPORT ID: HT152</div>
-
-               @*           <button type="button" class="ht152-btn ht152-btn-secondary" onclick="HT152_DownloadSelected()">
-                              <i class="fas fa-download"></i> Download
-                         </button> *@
-                    </div>
-               </div>
-               <!-- ✅ Nice page alert (hidden by default) -->
-               <div id="ht152Alert" class="ht152-alert" style="display:none;">
-                    <div class="ht152-alert-icon" id="ht152AlertIcon">⚠️</div>
-                    <div class="ht152-alert-text" id="ht152AlertText"></div>
-                    <button type="button" class="ht152-alert-close" onclick="HT152_HideAlert()">✕</button>
-               </div>
-
-               <div class="ht152-content">
-
-                    <!-- Hotel -->
-                    <div class="ht152-form-group">
-                         <label class="ht152-label" for="ddlHotelList">Hotel</label>
-                         <select id="ddlHotelList" class="ht152-control ht152-select">
-                           @*    <option value="">-- Select Hotel --</option> *@
-
-                              @if (Model?.Hotels != null && Model.Hotels.Count > 0)
-                              {
-                                   foreach (var h in Model.Hotels)
-                                   {
-                                        if ((h.Value ?? "") == selectedHotelId)
-                                        {
-                                             <option value="@h.Value" selected="selected">@h.Text</option>
-                                        }
-                                        else
-                                        {
-                                             <option value="@h.Value">@h.Text</option>
-                                        }
-                                   }
-                              }
-                              else
-                              {
-                                   <option value="101" selected="selected">Hilton Downtown (101)</option>
-                                   <option value="205">Marriott Airport (205)</option>
-                                   <option value="309">Hyatt City Center (309)</option>
-                              }
-                         </select>
-                         <div class="ht152-help">Select a hotel to generate the rooming list report.</div>
-                    </div>
-
-                <div class="ht152-merge-panel show" id="mergePanelWrap" hidden>
+CREATE PROCEDURE dbo.rpt_TT_BlkDetailInv                    
+/******************************************************************************************                  
+-- Author      : Sankalp Mishra                 
+-- Company     : Jsimple                  
+-- Project     : ICM                  
+-- File Name   : rpt_TT_BlkDetailInv.sql                  
+-- Description : Generates hotel-wise block detail and inventory summary report                   
+--               with Crystal-formula-equivalent calculations for RDLC output.                  
+--                  
+-- Parameters :                  
+--   @EMNNO     : Event number (varchar)                  
+--   @EMCNO     : Event category number (varchar)                  
+--   @From/@To  : (currently unused – kept for parity)                  
+--   @SessionID : Optional session tracking ID                  
+******************************************************************************************/            
+    @EMNNO     varchar(50)   = NULL,                    
+    @EMCNO     varchar(50)   = NULL,                    
+    @From      datetime      = NULL,                    
+    @To        datetime      = NULL,                    
+    @SessionID nvarchar(128) = NULL                    
+AS                    
+BEGIN                    
+    SET NOCOUNT ON;                      
+     
+    ------------------------------------------------------------            
+    -- Normalize EMNNO            
+    ------------------------------------------------------------            
+    DECLARE @EMNNO_INT INT = Cast(@EMNNO as INT);                    
+            
+    ------------------------------------------------------------            
+    -- 0) Event hotels for this event / EMCNO            
+    ------------------------------------------------------------            
+    IF OBJECT_ID('tempdb..#EventHotels') IS NOT NULL DROP TABLE #EventHotels;            
+            
+    SELECT  h.HTNNO,            
+            h.EMNNO            
+    INTO    #EventHotels            
+    FROM    dbo.HOTEL  AS h            
+    JOIN    dbo.EVENTS AS e ON e.EMNNO = h.EMNNO            
+    WHERE   (@EMNNO_INT IS NULL OR e.EMNNO = @EMNNO_INT)            
+      --AND   (@EMCNO     IS NULL OR e.EMCNO = @EMCNO);            
+            
+    ------------------------------------------------------------            
+    -- If nothing matches, still return 5 empty resultsets            
+    ------------------------------------------------------------            
+    IF NOT EXISTS (SELECT 1 FROM #EventHotels)            
+    BEGIN            
+        -- 1) Header            
+        SELECT TOP (0)            
+               EMCNM        = CAST(NULL AS varchar(100)),            
+               EMCNO        = CAST(NULL AS varchar(50)),            
+               EMDTBEG      = CAST(NULL AS varchar(50)),            
+               EMDTEND      = CAST(NULL AS varchar(50)),            
+               TotalRooms   = CAST(0 AS int),            
+               UnusedRooms  = CAST(0 AS int);            
+            
+        -- 2) HotelGroupingTable            
+        SELECT TOP (0)            
+               HTCDSC          = CAST(NULL AS varchar(100)),            
+               HTCSLENM        = CAST(NULL AS varchar(100)),            
+               HTCSLETEL       = CAST(NULL AS varchar(50)),            
+               HTCSLEEMAIL     = CAST(NULL AS varchar(100)),            
+               HTDTADDDATE     = CAST(NULL AS varchar(10)),            
+               HTDTCUTOFF      = CAST(NULL AS datetime),            
+               HTNCMPRMPER     = CAST(NULL AS int),            
+               HTNCMPRM        = CAST(NULL AS int),            
+               HTNNO           = CAST(NULL AS int),            
+               HotelDepositAmount = CAST(NULL AS varchar(20)),            
+               HotelRoomsRequested = CAST(0 AS int),            
+               HotelRoomsPickup    = CAST(0 AS int),            
+               HotelRoomsNotPicked = CAST(0 AS int);            
+            
+     -- 3) HotelWiseData            
+        SELECT TOP (0)            
+               WebCode      = CAST(NULL AS nvarchar(50)),            
+    BlockOverride= CAST(NULL AS date),            
+               TeamCutoff   = CAST(NULL AS date),            
+               TeamName     = CAST(NULL AS nvarchar(200)),            
+               GroupLeader  = CAST(NULL AS nvarchar(200)),            
+               Phone        = CAST(NULL AS nvarchar(50)),            
+        ApprovedDate = CAST(NULL AS date),            
+               [Block]      = CAST(NULL AS nvarchar(50)),            
+               RMSBlocked   = CAST(0 AS int),            
+           Pickup       = CAST(0 AS int),            
+               Cxl          = CAST(0 AS int),            
+               NotPickedup  = CAST(0 AS int),            
+               RMNIPickup   = CAST(0 AS int),            
+               HTNNO        = CAST(NULL AS int);            
+            
+        -- 4) HotelRates            
+        SELECT TOP (0)            
+               HTNNO          = CAST(NULL AS int),            
+               HotelRoomBlock = CAST(NULL AS nvarchar(4000)),            
+               [Block]        = CAST(0 AS int),            
+               PeakNightInv   = CAST(NULL AS varchar(50));            
+            
+        -- 5) Grand totals            
+        SELECT            
+            TotalRMSBlocked   = CAST(0 AS int),            
+            TotalPickup       = CAST(0 AS int),            
+            TotalNotPickedup  = CAST(0 AS int),            
+            TotalRMNIPickup   = CAST(0 AS int),            
+            GrandTotal        = CAST(0 AS int);            
+            
+        RETURN;            
+    END;            
+            
+    ------------------------------------------------------------            
+    -- 1) Block-level inventory: Maximum(...) over nights per block            
+    ------------------------------------------------------------            
+    IF OBJECT_ID('tempdb..#Blocks') IS NOT NULL DROP TABLE #Blocks;            
+            
+    ;WITH BlockInv AS            
+    (            
+        SELECT            
+            hb.HBNNO,            
+            hb.HTNNO,            
+            hb.HBNAPPROVED,            
+            hb.HBDTXLD,            
+            hb.HBCACRO,            
+            hb.HBCNO,            
+            hb.HBCORG,            
+            hb.HBCFNM,            
+            hb.HBCLNM,            
+            hb.HBCTEL,            
+            hb.HBDTAPPROVED,            
+            hb.HBOVERWRITECUTOFFDATE,            
+            hb.HBTEAMCUTOFFDATE,            
+            rc.RCCACRO,            
+            
+            ReqPerNight    = ISNULL(inv.RBNAMOUNTRESERVED,0) + ISNULL(inv.RBNADJUSTMENTS,0),            
+            PickupPerNight = ISNULL(inv.RBNAMOUNTRESERVED,0) + ISNULL(inv.RBNADJUSTMENTS,0) - ISNULL(inv.RBNREMAININGAVAILABLE,0),            
+            RemainPerNight = ISNULL(inv.RBNREMAININGAVAILABLE,0)            
+        FROM dbo.HOTELROOMBLOCKS hb            
+        JOIN #EventHotels    eh  ON eh.HTNNO = hb.HTNNO            
+        LEFT JOIN dbo.ROOMCATEGORIES          rc  ON rc.RCNNO = hb.RCNNO            
+        LEFT JOIN dbo.HOTELROOMBLOCKINVENTORY inv ON inv.HBNNO = hb.HBNNO            
+    )            
+    SELECT            
+        bi.HBNNO,            
+        bi.HTNNO,            
+        bi.HBNAPPROVED,            
+        bi.HBDTXLD,            
+        bi.HBCACRO,            
+        bi.HBCNO,            
+        bi.HBCORG,            
+        bi.HBCFNM,            
+        bi.HBCLNM,            
+        bi.HBCTEL,            
+        bi.HBDTAPPROVED,            
+        bi.HBOVERWRITECUTOFFDATE,            
+        bi.HBTEAMCUTOFFDATE,            
+        bi.RCCACRO,            
+            
+        MaxRequested = MAX(bi.ReqPerNight),            
+        MaxPickup    = MAX(bi.PickupPerNight),            
+        MaxRemain    = MAX(bi.RemainPerNight)            
+    INTO #Blocks            
+    FROM BlockInv bi            
+    GROUP BY            
+       bi.HBNNO,            
+        bi.HTNNO,            
+        bi.HBNAPPROVED,            
+        bi.HBDTXLD,            
+        bi.HBCACRO,            
+        bi.HBCNO,            
+        bi.HBCORG,            
+        bi.HBCFNM,            
+        bi.HBCLNM,            
+        bi.HBCTEL,            
+        bi.HBDTAPPROVED,           
+    bi.HBOVERWRITECUTOFFDATE,            
+        bi.HBTEAMCUTOFFDATE,            
+        bi.RCCACRO;            
+            
+    CREATE UNIQUE CLUSTERED INDEX IX_B_HBNNO ON #Blocks(HBNNO);            
+            
+    ------------------------------------------------------------            
+    -- 2) Cancelled reservations per block (CanceledCounter)            
+    ------------------------------------------------------------            
+    IF OBJECT_ID('tempdb..#BlockCxl') IS NOT NULL DROP TABLE #BlockCxl;            
+            
+    SELECT            
+        r.HBNNO,            
+        Cxl = SUM(            
+                CASE WHEN ISNULL(CONVERT(varchar(50), r.RSDTXLD), '') = '' THEN 0            
+                     ELSE 1            
+END)            
+    INTO #BlockCxl            
+    FROM dbo.RESERVATIONS r            
+    JOIN #Blocks b ON b.HBNNO = r.HBNNO            
+    GROUP BY r.HBNNO;            
+            
+    CREATE UNIQUE CLUSTERED INDEX IX_C_HBNNO ON #BlockCxl(HBNNO);            
+            
+    ------------------------------------------------------------            
+    -- 3) Room-nights per block (RMNIPickup) – Crystal #Nites logic            
+    -- #Nites:            
+    --   if HBNAPPROVED = 0 then 0            
+    --   else if RSDTXLD <> '' then 0            
+    --   else RSDTDEP - RSDTARR            
+    -- Running total in Crystal is effectively SUM(#Nites) per block.            
+    ------------------------------------------------------------            
+    IF OBJECT_ID('tempdb..#BlkRmNites') IS NOT NULL DROP TABLE #BlkRmNites;            
+            
+    SELECT            
+        r.HBNNO,            
+        RmNitesPickup =            
+            SUM(                  CASE             
+                    WHEN b.HBNAPPROVED = 0 THEN 0            
+                    WHEN ISNULL(CONVERT(varchar(50), r.RSDTXLD), '') <> '' THEN 0            
+                    ELSE DATEDIFF(DAY, r.RSDTARR, r.RSDTDEP)            
+                END            
+            )            
+    INTO #BlkRmNites            
+    FROM dbo.RESERVATIONS r            
+    JOIN #Blocks b ON b.HBNNO = r.HBNNO            
+    GROUP BY r.HBNNO;            
+            
+    CREATE UNIQUE CLUSTERED INDEX IX_RN_HBNNO ON #BlkRmNites(HBNNO);            
+            
+    ------------------------------------------------------------            
+    -- 4) Apply Crystal formulas per block (one row per HBNNO)            
+    ------------------------------------------------------------            
+    IF OBJECT_ID('tempdb..#BlockCalc') IS NOT NULL DROP TABLE #BlockCalc;            
+            
+    SELECT            
+        b.*,            
+            
+        CxlCount =            
+            ISNULL(c.Cxl, 0),            
+            
+        CancelledBlock =            
+            CASE WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') = '' THEN 'NotXld'            
+                 ELSE 'Xld'            
+            END,            
+            
+        -- Requested-From-Orig  (@Requested-From-Orig)            
+        RequestedFromOrig =            
+            CASE            
+                WHEN b.HBNAPPROVED = 0 THEN 0            
+                WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') <> '' THEN 0            
+                ELSE b.MaxRequested            
+            END,            
+            
+        -- BlkPickup  (@BlkPickup)            
+        BlkPickup =            
+            CASE            
+                WHEN b.HBNAPPROVED = 0 THEN 0            
+                WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') <> '' THEN 0            
+                ELSE b.MaxPickup            
+            END,            
+            
+        -- Remaining at peak night (old NotPickedup logic – keep for reference)            
+        RemainAtPeak =            
+            CASE            
+                WHEN b.HBNAPPROVED = 0 THEN 0            
+                WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') <> '' THEN 0            
+                ELSE b.MaxRemain            
+            END,            
+            
+        -- Block NotPickedUp            
+        -- BlockNotPickedup = Maximum(@Requested-From-Orig, @SubBlkSort)            
+        -- - Maximum(@BlkPickup, @SubBlkSort)            
+        BlockNotPickedUp =            
+            CASE            
+                WHEN b.HBNAPPROVED = 0 THEN 0            
+                WHEN ISNULL(CONVERT(varchar(50), b.HBDTXLD), '') <> '' THEN 0            
+                ELSE b.MaxRequested - b.MaxPickup            
+            END,            
+            
+        -- Room-nights in pickup (RMNIPickup column)            
+        RmNitesPickup =            
+            ISNULL(n.RmNitesPickup, 0),        
+     CrystalBlkGroupKey =        
+        CASE         
+            WHEN NULLIF(LTRIM(RTRIM(b.HBCACRO)), '') IS NULL        
+                THEN ISNULL(CONVERT(nvarchar(50), b.HBCNO), '')        
+                     + RIGHT('0000000000' + CONVERT(varchar(10), b.HBNNO), 10)        
+            ELSE LTRIM(RTRIM(b.HBCACRO))        
+                     + RIGHT('0000000000' + CONVERT(varchar(10), b.HBNNO), 10)        
+        END        
+    INTO #BlockCalc            
+    FROM #Blocks b            
+    LEFT JOIN #BlockCxl     c ON c.HBNNO = b.HBNNO            
+    LEFT JOIN #BlkRmNites   n ON n.HBNNO = b.HBNNO;            
+            
+    CREATE UNIQUE CLUSTERED INDEX IX_BC_HBNNO ON #BlockCalc(HBNNO);            
+            
+    ------------------------------------------------------------            
+    -- 5) HotelWiseData: detail rows for RDLC            
+    --    Column mapping to Crystal table:            
+    --      RMSBlocked   -> @Requested-From-Orig            
+    --      Pickup       -> @BlkPickup            
+    --      NotPickedup  -> BlockNotPickedup  (NOT RemainAtPeak)            
+    --      RMNIPickup   -> SUM(#Nites)            
+    ------------------------------------------------------------            
+    IF OBJECT_ID('tempdb..#HotelWiseData') IS NOT NULL DROP TABLE #HotelWiseData;            
+            
+    SELECT            
+        WebCode       = NULLIF(LTRIM(RTRIM(bc.HBCACRO)), ''),            
+        BlockOverride = CONVERT(date, bc.HBOVERWRITECUTOFFDATE),            
+        TeamCutoff    = CONVERT(date, bc.HBTEAMCUTOFFDATE),            
+        TeamName      = NULLIF(LTRIM(RTRIM(bc.HBCORG)), ''),            
+        GroupLeader   = LTRIM(RTRIM(ISNULL(bc.HBCFNM,'') + ' ' + ISNULL(bc.HBCLNM,''))),            
+        Phone         = bc.HBCTEL,            
+        ApprovedDate  = CONVERT(date, bc.HBDTAPPROVED),            
+        [Block]       = bc.RCCACRO,            
+            
+        RMSBlocked    = bc.RequestedFromOrig,            
+        Pickup        = bc.BlkPickup,            
+        Cxl           = bc.CxlCount,            
+        NotPickedup   = bc.BlockNotPickedUp,   -- << Crystal BlockNotPickedup            
+        RMNIPickup    = bc.RmNitesPickup,      -- << SUM(#Nites)            
+  CrystalBlkGroupKey = bc.CrystalBlkGroupKey,        
+        HTNNO         = bc.HTNNO            
+    INTO #HotelWiseData            
+    FROM #BlockCalc bc        
+ WHERE NOT        
+(        
+    LOWER(COALESCE(LTRIM(RTRIM(bc.HBCACRO)), '')) = 'request'        
+    AND bc.HBOVERWRITECUTOFFDATE IS NULL        
+    AND ISNULL(bc.RequestedFromOrig, 0) = 0        
+    AND ISNULL(bc.BlkPickup, 0) = 0        
+    AND ISNULL(bc.CxlCount, 0) = 0        
+    AND ISNULL(bc.BlockNotPickedUp, 0) = 0        
+    AND ISNULL(bc.RmNitesPickup, 0) = 0        
+);        
+            
+    CREATE NONCLUSTERED INDEX IX_HWD_HTNNO ON #HotelWiseData(HTNNO);            
+            
+     ------------------------------------------------------------            
+    -- 5a) Ensure every hotel appears at least once in #HotelWiseData            
+    --     Even if there are no blocks/reservations for that hotel,            
+    --     insert a single "blank" row with zeros.            
+    ------------------------------------------------------------            
+    INSERT INTO #HotelWiseData            
+    (            
+        WebCode,            
+        BlockOverride,            
+        TeamCutoff,            
+        TeamName,            
+        GroupLeader,            
+        Phone,            
+        ApprovedDate,            
+        [Block],            
+        RMSBlocked,            
+        Pickup,            
+        Cxl,            
+        NotPickedup,       
+        RMNIPickup,            
+        HTNNO ,        
+  CrystalBlkGroupKey         
+    )            
+    SELECT            
+        WebCode       = NULL,            
+        BlockOverride = NULL,            
+        TeamCutoff    = NULL,            
+        TeamName      = NULL,            
+        GroupLeader   = NULL,            
+        Phone         = NULL,            
+        ApprovedDate  = NULL,            
+       [Block]       = NULL,            
+        RMSBlocked    = 0,            
+        Pickup        = 0,            
+        Cxl           = 0,            
+        NotPickedup   = 0,            
+        RMNIPickup    = 0,            
+        HTNNO         = eh.HTNNO,        
+  NULL        
+    FROM #EventHotels eh            
+    LEFT JOIN #HotelWiseData hwd ON hwd.HTNNO = eh.HTNNO            
+    WHERE hwd.HTNNO IS NULL;            
+            
+            
+    ------------------------------------------------------------            
+    -- 6) Event totals from HotelWiseData (Crystal-style)            
+    ------------------------------------------------------------            
+    DECLARE @TotalRMSBlocked   INT = 0,            
+            @TotalPickup       INT = 0,            
+            @TotalNotPickedup  INT = 0,            
+            @TotalRMNIPickup   INT = 0,            
+            @GrandTotal        INT = 0,            
+            @TotalRooms        INT = 0,   -- from HOTELINVENTORY peak logic            
+            @UnusedRooms       INT = 0;   -- TotalRooms - TotalPickup            
+            
+    SELECT            
+        @TotalRMSBlocked   = ISNULL(SUM(RMSBlocked),0),            
+        @TotalPickup       = ISNULL(SUM(Pickup),0),            
+        @TotalNotPickedup  = ISNULL(SUM(NotPickedup),0),            
+        @TotalRMNIPickup   = ISNULL(SUM(RMNIPickup),0)            
+    FROM #HotelWiseData;            
+            
+    SET @GrandTotal = @TotalRMSBlocked;            
+            
+    ------------------------------------------------------------            
+    -- 7) Build HotelRatesAgg once (original subreport SQL) and            
+    --    use PeakInv sum for TotalRooms / UnusedRooms.            
+    ------------------------------------------------------------            
+    IF OBJECT_ID('tempdb..#HotelRatesAgg') IS NOT NULL DROP TABLE #HotelRatesAgg;            
+            
+    ;WITH RateBase AS                
+    (                
+        SELECT                
+            h.HTNNO,                
+            rc.RCCACRO,                
+            hrc.HRCBLOCKREQUEST,                
+            hrt.HCNCOST,                
+            hi.HINAMOUNTRESERVED                
+        FROM #EventHotels eh                
+        JOIN dbo.HOTEL               AS h   ON h.HTNNO = eh.HTNNO                
+        JOIN dbo.EVENTS              AS e   ON e.EMNNO = h.EMNNO                
+        JOIN dbo.HOTELROOMCATEGORIES AS hrc ON h.HTNNO = hrc.HTNNO                
+        JOIN dbo.HOTELINVENTORY      AS hi  ON hrc.HRNNO = hi.HRNNO                
+        JOIN dbo.ROOMCATEGORIES      AS rc  ON hrc.RCNNO = rc.RCNNO                
+        JOIN dbo.HOTELROOMTYPECOSTS  AS hrt ON hi.HINNO = hrt.HINNO                
+        WHERE (@EMNNO_INT IS NULL OR e.EMNNO = @EMNNO_INT)                
+          --AND (@EMCNO     IS NULL OR e.EMCNO = @EMCNO)                
+    ),                
+    Agg AS             
+    (            
+        SELECT                
+            HTNNO,                
+            RCCACRO,                
+            HRCBLOCKREQUEST,                
+            TotalHCNCost = MAX(ISNULL(HCNCOST,0)),                
+            PeakInv      = MAX(ISNULL(HINAMOUNTRESERVED,0))                
+        FROM RateBase                
+        GROUP BY HTNNO, RCCACRO, HRCBLOCKREQUEST                
+    )                
+    SELECT *            
+    INTO #HotelRatesAgg            
+    FROM Agg;            
+            
+    -- TotalRooms = sum of PeakInv across all hotels/categories            
+    SELECT @TotalRooms = ISNULL(SUM(PeakInv), 0)            
+    FROM #HotelRatesAgg;            
+            
+    -- UnusedRooms = TotalRooms - total pickup (block-based pickup)            
+    SET @UnusedRooms = @TotalRooms - ISNULL(@TotalPickup, 0);            
+            
+    ------------------------------------------------------------            
+    -- 8) Resultset #1 – Header (Event info + TotalRooms/UnusedRooms)            
+    ------------------------------------------------------------            
+    SELECT TOP (1)            
+           e.EMCNM,            
+           e.EMCNO,            
+           EMDTBEG =            
+               DATENAME(WEEKDAY, e.EMDTBEG) + ', ' + CONVERT(varchar(10), e.EMDTBEG, 101) +            
+               ' - ' +            
+               DATENAME(WEEKDAY, e.EMDTEND) + ', ' + CONVERT(varchar(10), e.EMDTEND, 101),            
+           EMDTEND   = CONVERT(varchar(10), e.EMDTEND, 101),            
+           TotalRooms  = @TotalRooms,            
+           UnusedRooms = @UnusedRooms            
+    FROM dbo.EVENTS e            
+    WHERE (@EMNNO_INT IS NULL OR e.EMNNO = @EMNNO_INT)            
+      --AND (@EMCNO     IS NULL OR e.EMCNO = @EMCNO)            
+    ORDER BY e.EMNNO;            
+            
+    ------------------------------------------------------------        
+ -- 9) Resultset #2 – HotelGroupingTable  (FIXED)        
+ ------------------------------------------------------------        
+        
+ ;WITH HotelBase AS        
+ (        
+  SELECT DISTINCT        
+   HTNNO,        
+   HTCDSC,        
+   HTCSLENM,        
+   HTCSLETEL,        
+   HTCSLEEMAIL,        
+   HTDTADDDATE,        
+   HTDTCUTOFF,        
+   HTNCMPRMPER,        
+   HTNCMPRM,        
+   HTCACCTYPE        
+  FROM dbo.HOTEL        
+ )        
+ SELECT        
+  h.HTCDSC,        
+  h.HTCSLENM,        
+  h.HTCSLETEL,        
+  h.HTCSLEEMAIL,        
+  HTDTADDDATE = CONVERT(varchar(10), h.HTDTADDDATE, 101),        
+  h.HTDTCUTOFF,        
+  h.HTNCMPRMPER,        
+  h.HTNCMPRM,        
+  h.HTNNO,        
+  -- Robust per-hotel deposit label        
+  HotelDepositAmount =        
+   MAX(CASE        
+     WHEN UPPER(LTRIM(RTRIM(ISNULL(h.HTCACCTYPE, '')))) = 'DA'        
+      THEN 'DEPOSIT HOTEL'        
+     ELSE ''        
+    END),        
+        
+  HotelRoomsRequested = ISNULL(SUM(hwd.RMSBlocked),0),        
+  HotelRoomsPickup    = ISNULL(SUM(hwd.Pickup),0),        
+  HotelRoomsNotPicked = ISNULL(SUM(hwd.NotPickedup),0)        
+        
+ FROM HotelBase h        
+ JOIN #EventHotels eh ON eh.HTNNO = h.HTNNO        
+ LEFT JOIN #HotelWiseData hwd ON hwd.HTNNO = h.HTNNO        
+        
+ GROUP BY        
+  h.HTCDSC,        
+  h.HTCSLENM,        
+  h.HTCSLETEL,        
+  h.HTCSLEEMAIL,        
+  h.HTDTADDDATE,        
+  h.HTDTCUTOFF,        
+  h.HTNCMPRMPER,        
+  h.HTNCMPRM,        
+  h.HTNNO        
+        
+ ORDER BY h.HTCDSC;        
+        
+            
+    ------------------------------------------------------------            
+    -- 10) Resultset #3 – HotelWiseData (detail rows)            
+    ------------------------------------------------------------            
+    SELECT            
+        WebCode,            
+        BlockOverride,            
+        TeamCutoff,            
+        TeamName,            
+        GroupLeader,            
+        Phone,            
+        ApprovedDate,            
+        [Block],            
+        RMSBlocked,            
+        Pickup,            
+   Cxl,            
+        NotPickedup,            
+        RMNIPickup,            
+        HTNNO            
+    FROM #HotelWiseData         
+   ORDER BY         
+    --HTNNO,        
+    CrystalBlkGroupKey ASC;        
+   --- TeamName,        
+   -- WebCode,        
+   -- [Block];        
+         
+            
+    ------------------------------------------------------------            
+    -- 11) Resultset #4 – HotelRates (subreport dataset)            
+    ------------------------------------------------------------            
+  SELECT                
+    a.HTNNO,                
+        
+   HotelRoomBlock =        
+    CAST(        
+          '<b>' + a.RCCACRO + ': '         
+          + CONVERT(varchar(20), CAST(a.TotalHCNCost AS decimal(18,2)))         
+          + '</b>'        
+          + CASE                
+                WHEN a.HRCBLOCKREQUEST IS NOT NULL                
+                     AND LTRIM(RTRIM(a.HRCBLOCKREQUEST)) <> ''                
+                     AND UPPER(LTRIM(RTRIM(a.HRCBLOCKREQUEST))) <> 'NONE'                
+                THEN '<br/><i>' + a.HRCBLOCKREQUEST + '</i>'                  
+                ELSE ''                
+            END        
+         AS nvarchar(4000)        
+    ),        
+        
+    [Block]      = CAST(0 AS int),                    
+   PeakNightInv =        
+    CAST(        
+        'Peak Night Inv: ' + CONVERT(varchar(20), a.PeakInv)        
+        + CASE        
+            WHEN a.HRCBLOCKREQUEST IS NOT NULL        
+                 AND LTRIM(RTRIM(a.HRCBLOCKREQUEST)) <> ''        
+                 AND UPPER(LTRIM(RTRIM(a.HRCBLOCKREQUEST))) <> 'NONE'        
+            THEN '<br/>&nbsp;'        
+            ELSE ''        
+          END        
+        AS nvarchar(4000)        
+    )        
+        
+FROM #HotelRatesAgg a                
+ORDER BY a.HTNNO, a.RCCACRO;         
                    
-                </div>
-
-                    <!-- Date Range -->
-                    <div class="ht152-form-group">
-                         <label class="ht152-label">Date Range</label>
-
-                         <input type="hidden" id="hdnToday" value="@Model.CurrentDate" />
-
-                         <div class="ht152-datetime">
-                              <input id="txtFromDate"
-                                     class="ht152-control ht152-date"
-                                     value="@Model.FromDate"
-                                     placeholder="MM/DD/YYYY"
-                                     readonly
-                                     autocomplete="off" />
-
-                              <select id="ddlFrmHour" class="ht152-control ht152-select ht152-hour">
-                                   @foreach (var h in Model.Hours)
-                                   {
-                                        if ((h.Value ?? "") == (Model.FrmHour ?? ""))
-                                        {
-                                             <option value="@h.Value" selected="selected">@h.Text</option>
-                                        }
-                                        else
-                                        {
-                                             <option value="@h.Value">@h.Text</option>
-                                        }
-                                   }
-                              </select>
-
-                              <select id="ddlFrmMin" class="ht152-control ht152-select ht152-time">
-                                   @foreach (var m in Model.Minutes)
-                                   {
-                                        if ((m.Value ?? "") == (Model.FrmMin ?? ""))
-                                        {
-                                             <option value="@m.Value" selected="selected">@m.Text</option>
-                                        }
-                                        else
-                                        {
-                                             <option value="@m.Value">@m.Text</option>
-                                        }
-                                   }
-                              </select>
-
-                              <select id="ddlFrmAmPM" class="ht152-control ht152-select ht152-time">
-                                   @foreach (var ap in Model.AmPm)
-                                   {
-                                        if ((ap.Value ?? "") == (Model.FrmAmPm ?? ""))
-                                        {
-                                             <option value="@ap.Value" selected="selected">@ap.Text</option>
-                                        }
-                                        else
-                                        {
-                                             <option value="@ap.Value">@ap.Text</option>
-                                        }
-                                   }
-                              </select>
-
-                              <span class="ht152-sep">to</span>
-
-
-                              <input id="txtToDate"
-                                     class="ht152-control ht152-date"
-                                     value="@Model.ToDate"
-                                     placeholder="MM/DD/YYYY"
-                                     readonly
-                                     autocomplete="off" />
-
-                              <select id="ddlToHour" class="ht152-control ht152-select ht152-time">
-                                   @foreach (var h in Model.Hours)
-                                   {
-                                        if ((h.Value ?? "") == (Model.ToHour ?? ""))
-                                        {
-                                             <option value="@h.Value" selected="selected">@h.Text</option>
-                                        }
-                                        else
-                                        {
-                                             <option value="@h.Value">@h.Text</option>
-                                        }
-                                   }
-                              </select>
-
-                              <select id="ddlToMin" class="ht152-control ht152-select ht152-time">
-                                   @foreach (var m in Model.Minutes)
-                                   {
-                                        if ((m.Value ?? "") == (Model.ToMin ?? ""))
-                                        {
-                                             <option value="@m.Value" selected="selected">@m.Text</option>
-                                        }
-                                        else
-                                        {
-                                             <option value="@m.Value">@m.Text</option>
-                                        }
-                                   }
-                              </select>
-
-                              <select id="ddlToAmPM" class="ht152-control ht152-select ht152-time">
-                                   @foreach (var ap in Model.AmPm)
-                                   {
-                                        if ((ap.Value ?? "") == (Model.ToAmPm ?? ""))
-                                        {
-                                             <option value="@ap.Value" selected="selected">@ap.Text</option>
-                                        }
-                                        else
-                                        {
-                                             <option value="@ap.Value">@ap.Text</option>
-                                        }
-                                   }
-                              </select>
-                         </div>
-
-                         <div class="ht152-help">Select start and end date/time for the report period.</div>
-                    </div>
-
-
-                    <!-- Comments -->
-                    @* <div class="ht152-form-group">
-                         <label class="ht152-label" for="TxtComments">Comments</label>
-                         <input id="TxtComments" class="ht152-control" value="@comments" />
-                         <div class="ht152-help">Optional: add comments to include with the generated report.</div>
-                    </div> *@
-
-                    <!-- Report Types -->
-                    <div class="ht152-form-group">
-                         <label class="ht152-label">Report Types</label>
-
-                         <div class="ht152-checkboxes">
-                              <label class="ht152-check">
-                                   @if (chkNew)
-                                   {
-                                        <input type="checkbox" id="ChkNew" checked="checked" />
-                                   }
-                                   else
-                                   {
-                                        <input type="checkbox" id="ChkNew" />
-                                   }
-                                   <span class="ht152-box"></span>
-                                   <span>New Reservations</span>
-                              </label>
-
-                              <label class="ht152-check">
-                                   @if (chkChanged)
-                                   {
-                                        <input type="checkbox" id="ChkChanged" checked="checked" />
-                                   }
-                                   else
-                                   {
-                                        <input type="checkbox" id="ChkChanged" />
-                                   }
-                                   <span class="ht152-box"></span>
-                                   <span>Changed Reservations</span>
-                              </label>
-
-                              <label class="ht152-check">
-                                   @if (chkCanceled)
-                                   {
-                                        <input type="checkbox" id="ChkCanceled" checked="checked" />
-                                   }
-                                   else
-                                   {
-                                        <input type="checkbox" id="ChkCanceled" />
-                                   }
-                                   <span class="ht152-box"></span>
-                                   <span>Canceled Reservations</span>
-                              </label>
-                         </div>
-
-                        @*  <div class="ht152-help">Select at least one report type.</div> *@
-                    </div>
-
-                    <!-- Buttons -->
-                    <div class="ht152-actions">
-                   @*  <button type="button" class="ht152-btn ht152-btn-primary" onclick="HT152_Process()" id="btnGenerateHotel">
-                              <span>📊</span> Generate Report
-                         </button> *@
-                    <button type="button" id="btnGenerate" class="ht152-btn ht152-btn-primary" style="display: none;">
-                        📊 Generate Report
-                    </button>
-
-                      @*    <button type="button" class="ht152-btn ht152-btn-secondary" onclick="HT152_Reset()">
-                              Reset
-                         </button> *@
-                    </div>
-
-                    <!-- Report History -->
-                    <div class="ht152-reports">
-                         <div class="ht152-section-title">Report History</div>
-
-                         <div class="ht152-list" id="HT152ReportHistory">
-                              
-                         </div>
-                    </div>
-
-               </div>
-          </form>
-
-          <!-- Processing Overlay -->
-          <div id="Processing" class="ht152-overlay">
-               <div class="box">
-                    <div class="ht152-spinner"></div>
-                    <div style="font-weight:800;margin-bottom:8px;font-size:16px;color:var(--text-dark);">Generating Report</div>
-                    <div style="font-size:14px;color:var(--text-medium);">Processing your rooming list data...</div>
-               </div>
-          </div>
-     </div>
-</div>
-<div class="modal-overlay" id="confirmModal">
-    <div class="modal-box">
-        <div class="modal-title" id="confirmModalTitle">Confirm Merged Report</div>
-        <div class="modal-body">
-            <div id="confirmModalBody"></div>
-            <div class="modal-cross-note" id="confirmCrossNote">
-                🔀 <strong>Cross-event merge detected.</strong> One or more selected hotels belong to a different event. Reservations from multiple events will be combined into a single rooming list.
-            </div>
-        </div>
-        <div class="modal-actions">
-            <button type="button" class="modal-btn modal-btn-cancel" id="btnModalCancel">Cancel</button>
-            <button type="button" class="modal-btn modal-btn-ok" id="btnModalOk">OK, Proceed</button>
-        </div>
-    </div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-
-
-
-                
-				
-				js
-				
-				
-				
-				
-
-document.addEventListener("DOMContentLoaded", function () {
-
-     // safety check
-     if (typeof flatpickr === "undefined") {
-          console.error("flatpickr not loaded");
-          return;
-     }
-
-     const fromEl = document.getElementById("txtFromDate");
-     const toEl = document.getElementById("txtToDate");
-
-     if (!fromEl || !toEl) {
-          console.error("Date inputs not found");
-          return;
-     }
-
-     // ✅ real calendar picker
-     window.fpFrom = flatpickr(fromEl, {
-          dateFormat: "m/d/Y",
-          allowInput: false,
-          clickOpens: true,
-          defaultDate: fromEl.value
-     });
-
-     window.fpTo = flatpickr(toEl, {
-          dateFormat: "m/d/Y",
-          allowInput: false,
-          clickOpens: true,
-          defaultDate: toEl.value
-     });
-});
-
-
-// wwwroot/js/ht152.js
-(function () {
-
-  const ALERT_AUTO_HIDE_MS = 2500;
-
-  function showOverlay() {
-    const el = document.getElementById("Processing");
-    if (el) el.style.display = "flex";
-  }
-
-  function hideOverlay() {
-    const el = document.getElementById("Processing");
-    if (el) el.style.display = "none";
-  }
-
-  // ✅ Global so your button onclick works
-  window.HT152_ShowAlert = function (message, type) {
-    const box = document.getElementById("ht152Alert");
-    const txt = document.getElementById("ht152AlertText");
-    const ico = document.getElementById("ht152AlertIcon");
-    if (!box || !txt || !ico) return;
-
-    box.classList.remove("error", "info", "success");
-    box.classList.add(type || "info");
-
-    ico.textContent = (type === "success") ? "✅" : (type === "error") ? "⚠️" : "ℹ️";
-    txt.textContent = message;
-
-    box.style.display = "flex";
-    requestAnimationFrame(() => box.classList.add("show"));
-
-    // ✅ auto-hide in 2.5 sec
-    clearTimeout(window.__ht152AlertTimer);
-    window.__ht152AlertTimer = setTimeout(() => window.HT152_HideAlert(), ALERT_AUTO_HIDE_MS);
-  };
-
-  // ✅ Global so close button onclick works
-  window.HT152_HideAlert = function () {
-    const box = document.getElementById("ht152Alert");
-    if (!box) return;
-
-    clearTimeout(window.__ht152AlertTimer);
-
-    box.classList.remove("show");
-    setTimeout(() => { box.style.display = "none"; }, 220);
-  };
-
-  // ✅ reusable binder
-  window.HT152_BindHistory = function (history) {
-    const box = document.getElementById("HT152ReportHistory");
-    if (!box) return;
-
-    box.innerHTML = "";
-
-    if (!history || history.length === 0) {
-      box.innerHTML = `
-        <div class="ht152-item">
-          <div class="ht152-type">-</div>
-          <div class="ht152-name">No history found for this hotel.</div>
-          <div class="ht152-action"></div>
-        </div>`;
-      return;
-    }
-
-    // header row
-    const header = document.createElement("div");
-    header.className = "ht152-item ht152-header";
-    header.innerHTML = `
-      <div class="ht152-type">Report Type</div>
-      <div class="ht152-name">Report Name</div>
-    `;
-    box.appendChild(header);
-
-    history.forEach(r => {
-      const type = r.rpttype ?? r.RPTTYPE ?? "";
-      const url = r.rpturl ?? r.RPTURL ?? "";
-      const name = r.rptname ?? r.RPTNAME ?? "";
-
-      const displayRaw = (name && name.trim()) ? name : url;
-      const display = String(displayRaw).split(/[\\/]/).pop();
-
-      const div = document.createElement("div");
-      div.className = "ht152-item";
-      div.innerHTML = `
-        <div class="ht152-type">${type}</div>
-        <div class="ht152-name">${display}</div>
-      `;
-      box.appendChild(div);
-    });
-  };
-
- 
-
-  // ✅ On hotel change
-  window.HT152_OnHotelChange = async function () {
-    const hotelId = parseInt(document.getElementById("ddlHotelList").value || "0", 10);
-
-      HotelDetailsWithRFP(hotelId);
-    if (!hotelId) {
-      window.HT152_BindHistory([]);
-      return;
-    }
-
-    const res = await fetch("/Admin/ReportHT152/GetDefaultFromTo", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ hotelId })
-    });
-
-    const data = await res.json();
-    if (!data) return;
-
-    const fromDate = data.fromDate || data.FromDate || "";
-    const toDate = data.toDate || data.ToDate || "";
-
-    document.getElementById("txtFromDate").value = fromDate;
-    document.getElementById("txtToDate").value = toDate;
-
-    if (window.fpFrom && fromDate) window.fpFrom.setDate(fromDate, true, "m/d/Y");
-    if (window.fpTo && toDate) window.fpTo.setDate(toDate, true, "m/d/Y");
-
-    document.getElementById("ddlFrmHour").value = data.frmHour || data.FrmHour || "12";
-    document.getElementById("ddlFrmMin").value = data.frmMin || data.FrmMin || "00";
-    document.getElementById("ddlFrmAmPM").value = data.frmAmPm || data.FrmAmPm || "AM";
-
-    document.getElementById("ddlToHour").value = data.toHour || data.ToHour || "12";
-    document.getElementById("ddlToMin").value = data.toMin || data.ToMin || "00";
-    document.getElementById("ddlToAmPM").value = data.toAmPm || data.ToAmPm || "AM";
-
-    window.HT152_BindHistory(data.history || data.History || []);
-  };
-
-  // ✅ Generate report (no window.open)
-  window.HT152_Process = async function () {
-    const hotelVal = (document.getElementById("ddlHotelList").value || "").trim();
-    const hotelId = parseInt(hotelVal || "0", 10);
-
-    if (!hotelId) {
-      window.HT152_ShowAlert("Please select a hotel before generating the report.", "error");
-      return;
-    }
-
-    const chkNew = document.getElementById("ChkNew").checked;
-    const chkChanged = document.getElementById("ChkChanged").checked;
-    const chkCanceled = document.getElementById("ChkCanceled").checked;
-
-    if (!chkNew && !chkChanged && !chkCanceled) {
-      window.HT152_ShowAlert("Please select at least one Report Type (New / Changed / Canceled).", "error");
-      return;
-    }
-
-    window.HT152_HideAlert();
-    showOverlay();
-
-    const payload = {
-      hotelId: hotelId,
-      fromDate: document.getElementById("txtFromDate").value,
-      toDate: document.getElementById("txtToDate").value,
-
-      frmHour: document.getElementById("ddlFrmHour").value,
-      frmMin: document.getElementById("ddlFrmMin").value,
-      frmAmPm: document.getElementById("ddlFrmAmPM").value,
-
-      toHour: document.getElementById("ddlToHour").value,
-      toMin: document.getElementById("ddlToMin").value,
-      toAmPm: document.getElementById("ddlToAmPM").value,
-
-      chkNew: chkNew,
-      chkChanged: chkChanged,
-      chkCanceled: chkCanceled,
-
-      reportid: 0
-    };
-
-    try {
-      const res = await fetch("/Admin/ReportHT152/Process", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
-
-      const data = await res.json();
-      window.HT152_BindHistory(data.history || data.History || []);
-
-      // ✅ auto-hide success alert in 2.5 sec
-      window.HT152_ShowAlert("Report generated and saved in history.", "success");
-    } catch (e) {
-      window.HT152_ShowAlert("Something went wrong while generating the report. Please try again.", "error");
-    } finally {
-      hideOverlay();
-    }
-  };
-
-  function initFlatpickr() {
-    if (typeof flatpickr === "undefined") {
-      console.error("flatpickr not loaded");
-      return;
-    }
-
-    const fromEl = document.getElementById("txtFromDate");
-    const toEl = document.getElementById("txtToDate");
-    if (!fromEl || !toEl) return;
-
-    window.fpFrom = flatpickr(fromEl, {
-      dateFormat: "m/d/Y",
-      allowInput: false,
-      clickOpens: true,
-      defaultDate: fromEl.value
-    });
-
-    window.fpTo = flatpickr(toEl, {
-      dateFormat: "m/d/Y",
-      allowInput: false,
-      clickOpens: true,
-      defaultDate: toEl.value
-    });
-  }
-
-  document.addEventListener("DOMContentLoaded", function () {
-    initFlatpickr();
-
-    const ddl = document.getElementById("ddlHotelList");
-    if (ddl) ddl.addEventListener("change", window.HT152_OnHotelChange);
-
-    window.HT152_OnHotelChange();
-  });
-})();
-
-
-async function HotelDetailsWithRFP(hotelId) {
-
-    const HotelRequest = {
-        HotelId: hotelId,
-    };
-
-    const res = await fetch("/Admin/ReportHT152/HotelDetailsWithRFP", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(HotelRequest)
-    });
-
-    const data = await res.json();
-    if (!data || data.length === 0) return;
-
-    const panel = document.getElementById("mergePanelWrap");
-
-    // Hide initially
-    panel.style.display = "none";
-
-    if (data.length > 1) {
-
-        // 👉 Get main event (first record)
-        const mainEvent = data[0].emcno; // or use emnno
-
-        // 👉 Split data
-        const sameEventHotels = data.filter(d => d.emcno === mainEvent);
-        const crossEventHotels = data.filter(d => d.emcno !== mainEvent);
-
-        panel.removeAttribute("hidden");
-        panel.style.display = "block";
-
-        let html = '';
-
-        // ================= PANEL HEADER =================
-        html += `
-            <div class="merge-panel-head">
-                <div class="merge-panel-title">⤢ Related hotel versions detected</div>
-                <div class="merge-panel-subtitle">
-                    Select the versions you want to include in your merged rooming list.
-                </div>
-            </div>
-        `;
-
-        // ================= SAME EVENT SECTION =================
-        html += `<div class="merge-panel-body" id="mergeHotelList">`;
-
-        sameEventHotels.forEach((d, index) => {
-
-            let isPrimary = index === 0 ? 'is-primary is-checked' : '';
-            let isDisabled = index === 0 ? 'disabled checked' : '';
-
-            html += `
-                <div class="merge-hotel-item ${isPrimary}" data-id="${d.htnno}">
-                    <input type="checkbox" ${isDisabled}>
-                    <div class="hotel-info">
-                        <div class="hotel-name">${d.htcdsc || ''}</div>
-                        <div class="hotel-meta">
-                            <span class="rfp-badge-inline">RFP: ${d.htcrfpid || ''}</span>
-                        </div>
-                    </div>
-                </div>
-            `;
-        });
-
-        html += `</div>`; // close body
-
-        // ================= SUMMARY =================
-        
-
-        // ================= CROSS EVENT SECTION =================
-        if (crossEventHotels.length > 0) {
-
-            html += `<div class="merge-section-divider cross-divider">Different Event</div>`;
-
-            crossEventHotels.forEach(d => {
-                html += `
-                    <div class="merge-hotel-item is-cross" data-id="${d.htnno}">
-                        <input type="checkbox">
-                        <div class="hotel-info">
-                            <div class="hotel-name">${d.htcdsc || ''}</div>
-                            <div class="hotel-meta">
-                                <span class="rfp-badge-inline">RFP: ${d.htcrfpid || ''}</span>
-                            </div>
-                        </div>
-                        <span class="event-tag">Event: ${d.emcno || ''}</span>
-                    </div>
-                `;
-            });
-        }
-        html += `
-            <div class="merge-summary show" id="mergeSummary">
-                <strong>Selected for merge:</strong>
-                <div class="merge-chips" id="mergeSummaryChips">
-                    <span class="merge-chip">
-                        ${sameEventHotels.length > 0 ? sameEventHotels[0].htcdsc : ''}
-                    </span>
-                </div>
-            </div>
-        `;
-        // ================= RENDER =================
-        panel.innerHTML = html;
-
-        panel.addEventListener("change", function (e) {
-
-            if (e.target.type === "checkbox") {
-
-                // ❌ جلوگیری cross-event selection (optional)
-               
-
-                updateSelectedHotels();
-            }
-        });
-
-
-       
-        function updateSelectedHotels() {
-
-            const chipsContainer = panel.querySelector("#mergeSummaryChips");
-            chipsContainer.innerHTML = "";
-
-            const selectedItems = panel.querySelectorAll(".merge-hotel-item input[type='checkbox']:checked");
-
-            selectedItems.forEach(cb => {
-                const parent = cb.closest(".merge-hotel-item");
-                const hotelName = parent.querySelector(".hotel-name").innerText;
-                const hotelId =parent.querySelector(".hotel-name").closest(".merge-hotel-item").dataset.id
-                const eventCode = parent.querySelector(".event-tag")?.innerText || "";
-
-                const chip = document.createElement("span");
-
-                // 👉 Check if cross-event
-                if (parent.classList.contains("is-cross")) {
-                    chip.className = "merge-chip cross-chip";
-                    chip.innerText = `${hotelName} (${eventCode.replace("Event: ", "")})`;
-                } else {
-                    chip.className = "merge-chip";
-                    chip.value = hotelId;
-                    chip.innerText = hotelName;
-                }
-
-                chipsContainer.appendChild(chip);
-            });
-        }
-
-        // 👉 Initialize default selection
-        updateSelectedHotels();
-        document.getElementById("btnGenerate").style.display = "block";
-        document.getElementById("btnGenerateHotel").style.display = "none";
-    }
-
-    
-    document.getElementById("btnGenerate").style.display = "block";
-   
-}
-
-
-//document.addEventListener('DOMContentLoaded', function () {
-
-//    document.getElementById('btnGenerate').addEventListener('click', function () {
-
-//        const hotels = document.querySelectorAll('#mergePanelWrap .merge-hotel-item');
-
-//        let selectedHotels = [];
-//        let isCrossEvent = false;
-
-//        hotels.forEach(item => {
-
-//            const checkbox = item.querySelector('input[type="checkbox"]');
-//            const isSelected = item.classList.contains('is-checked') || (checkbox && checkbox.checked);
-
-//            if (isSelected) {
-
-//                const name = item.querySelector('.hotel-name').innerText.trim();
-//                const hotelId = item.querySelector(".hotel-name").closest(".merge-hotel-item").dataset.id
-
-//                if (item.classList.contains('is-cross')) {
-//                    isCrossEvent = true;
-//                }
-
-//                let eventTag = item.querySelector('.event-tag')?.innerText || '';
-
-//                selectedHotels.push({
-//                    hotelId: hotelId,
-//                    name: name,
-//                    event: eventTag
-//                });
-//            }
-//        });
-
-//        //if (selectedHotels.length === 0) {
-//        //    alert('Please select at least one hotel');
-//        //    return;
-//        //}
-
-//        let html = '';
-
-//        // ✅ CASE 1: Only ONE hotel selected
-//        if (selectedHotels.length === 1) {
-
-//            const hotel = selectedHotels[0];
-
-//            document.getElementById('confirmModalTitle').innerText =
-//                'Run Report for One Hotel Only?';
-
-//            html = `
-//                <p>We detected other hotel versions with matching RFP IDs, but you have not selected any of them.</p>
-//                <p>You are about to generate a report for:</p>
-//                <div class="model-p"><ol>
-//                    <li><strong class="model-s" data-id="${hotel.hotelId}">${hotel.name} only.</strong></li>
-//                </ol></div>
-//                <p>Are you sure you only want to run the report for this one hotel?</p>
-//            `;
-
-//            // ❌ Hide cross-event warning
-//            document.getElementById('confirmCrossNote').style.display = 'none';
-//        }
-//        // ✅ CASE 2: Multiple hotels
-//        else {
-
-//            document.getElementById('confirmModalTitle').innerText =
-//                isCrossEvent ? 'Confirm Cross-Event Merged Report' : 'Confirm Merged Report';
-
-//            html = `<p>You have selected <strong class="model-s">${selectedHotels.length} hotels</strong> for a merged rooming list:</p><div class="model-p"><ol>`;
-
-//            selectedHotels.forEach(h => {
-//                html += `<li>
-//                            <strong class="model-s" data-id="${h.hotelId}">${h.name}</strong>
-//                            ${h.event ? `<strong class="model-e"> (${h.event})</strong>` : ''}
-//                        </li>`;
-//            });
-
-//            html += `</ol></div>`;
-
-//            // ✅ Show/hide cross-event note
-//            document.getElementById('confirmCrossNote').style.display =
-//                isCrossEvent ? 'block' : 'none';
-//        }
-
-//        // ✅ Bind content
-//        document.getElementById('confirmModalBody').innerHTML = html;
-
-//        // ✅ Show modal
-//        document.getElementById('confirmModal').style.display = 'block';
-//    });
-
-//    // Cancel
-//    document.getElementById('btnModalCancel').onclick = function () {
-//        document.getElementById('confirmModal').style.display = 'none';
-//    };
-
-//    // OK
-//    document.getElementById('btnModalOk').onclick = function () {
-//        document.getElementById('confirmModal').style.display = 'none';
-
-//        // 👉 Continue your report logic
-//    };
-
-//});
-
-document.addEventListener('DOMContentLoaded', function () {
-
-    // ✅ Row click + checkbox sync
-    document.querySelectorAll('#mergePanelWrap .merge-hotel-item').forEach(item => {
-
-        const checkbox = item.querySelector('input[type="checkbox"]');
-
-        // 👉 क्लिक on full row
-        item.addEventListener('click', function (e) {
-
-            // prevent double toggle if checkbox clicked directly
-            if (e.target.type === "checkbox") return;
-
-            checkbox.checked = !checkbox.checked;
-
-            item.classList.toggle('is-checked', checkbox.checked);
-
-            updateSelectedHotels(); // keep your existing UI sync
-        });
-
-        // 👉 direct checkbox click
-        checkbox.addEventListener('change', function () {
-            item.classList.toggle('is-checked', checkbox.checked);
-            updateSelectedHotels();
-        });
-
-    });
-
-    // ================= EXISTING CODE (UNCHANGED) =================
-
-    document.getElementById('btnGenerate').addEventListener('click', function () {
-
-        const hotels = document.querySelectorAll('#mergePanelWrap .merge-hotel-item');
-
-        let selectedHotels = [];
-        let isCrossEvent = false;
-
-        hotels.forEach(item => {
-
-            const checkbox = item.querySelector('input[type="checkbox"]');
-            const isSelected = item.classList.contains('is-checked') || (checkbox && checkbox.checked);
-
-            if (isSelected) {
-
-                const name = item.querySelector('.hotel-name').innerText.trim();
-                const hotelId = item.dataset.id;
-
-                if (item.classList.contains('is-cross')) {
-                    isCrossEvent = true;
-                }
-
-                let eventTag = item.querySelector('.event-tag')?.innerText || '';
-
-                selectedHotels.push({
-                    hotelId: hotelId,
-                    name: name,
-                    event: eventTag
-                });
-            }
-        });
-
-        let html = '';
-
-        // ✅ CASE 1: Only ONE hotel selected
-        if (selectedHotels.length === 1) {
-
-            const hotel = selectedHotels[0];
-
-            document.getElementById('confirmModalTitle').innerText =
-                'Run Report for One Hotel Only?';
-
-            html = `
-                <p>We detected other hotel versions with matching RFP IDs, but you have not selected any of them.</p>
-                <p>You are about to generate a report for:</p>
-                <div class="model-p"><ol>
-                    <li><strong class="model-s" data-id="${hotel.hotelId}">${hotel.name} only.</strong></li>
-                </ol></div>
-                <p>Are you sure you only want to run the report for this one hotel?</p>
-            `;
-
-            document.getElementById('confirmCrossNote').style.display = 'none';
-        }
-        // ✅ CASE 2: Multiple hotels
-        else {
-
-            document.getElementById('confirmModalTitle').innerText =
-                isCrossEvent ? 'Confirm Cross-Event Merged Report' : 'Confirm Merged Report';
-
-            html = `<p>You have selected <strong class="model-s">${selectedHotels.length} hotels</strong> for a merged rooming list:</p><div class="model-p"><ol>`;
-
-            selectedHotels.forEach(h => {
-                html += `<li>
-                            <strong class="model-s" data-id="${h.hotelId}">${h.name}</strong>
-                            ${h.event ? `<strong class="model-e"> (${h.event})</strong>` : ''}
-                        </li>`;
-            });
-
-            html += `</ol></div>`;
-
-            document.getElementById('confirmCrossNote').style.display =
-                isCrossEvent ? 'block' : 'none';
-        }
-
-        document.getElementById('confirmModalBody').innerHTML = html;
-        document.getElementById('confirmModal').style.display = 'block';
-    });
-
-    // Cancel
-    document.getElementById('btnModalCancel').onclick = function () {
-        document.getElementById('confirmModal').style.display = 'none';
-    };
-
-    // OK
-    document.getElementById('btnModalOk').onclick = function () {
-        document.getElementById('confirmModal').style.display = 'none';
-
-        // 👉 Continue your report logic
-    };
-
-});
-
-
-
-document.addEventListener('DOMContentLoaded', function () {
-
-    document.getElementById("btnModalOk").addEventListener("click", function () {
-
-        const ids = Array.from(document.querySelectorAll(".model-p .model-s"))
-            .map(el => el.dataset.id)
-            .filter(id => id)
-            .join(",");
-
-        
-        alert(ids);
-    });
-
-    
-
-});
-
-
-
-
-
-
-
-
+            
+    ------------------------------------------------------------            
+    -- 12) Resultset #5 – Grand totals for Event Totals row            
+    ------------------------------------------------------------            
+    SELECT            
+        TotalRMSBlocked   = @TotalRMSBlocked,            
+        TotalPickup       = @TotalPickup,            
+        TotalNotPickedup  = @TotalNotPickedup,            
+        TotalRMNIPickup   = @TotalRMNIPickup,            
+        GrandTotal        = @GrandTotal;            
+            
+    ------------------------------------------------------------            
+    -- Cleanup            
+    ------------------------------------------------------------            
+    DROP TABLE #HotelWiseData;            
+    DROP TABLE #BlockCalc;            
+    DROP TABLE #BlkRmNites;            
+    DROP TABLE #BlockCxl;            
+    DROP TABLE #Blocks;            
+    DROP TABLE #HotelRatesAgg;            
+    DROP TABLE #EventHotels;            
+END; 
