@@ -1,465 +1,92 @@
-using AspNetCore.Reporting; // if you use this renderer
-using EventManagerWeb.Areas.Admin.Models;
-using EventManagerWeb.Filter;
-using EventManagerWeb.Repository.IRepository;
-using Microsoft.AspNetCore.Hosting;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Configuration;
-using System;
-using System.Collections.Generic;
-using System.Data;
-using System.Globalization;
-using System.IO;
-using System.Linq;
-using System.Net;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace EventManagerWeb.Areas.Admin.Controllers
-{
-	[AuthorizationFilter]
-	//[Area("Admin")]
-	public class ReportHT152Controller : Controller
-	{
-		private readonly IReportHT152Repository _repo;
-		private readonly IWebHostEnvironment _env;
-        private readonly IHotelAdminRepository _eHRepo;
-        private readonly IRoomingListRepository _eRLRepo;
-        static ReportHT152Controller()
-		{
-			// Required by RDLC renderer in .NET Core for some encodings
-			Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-		}
-
-		public ReportHT152Controller(IReportHT152Repository repo, IWebHostEnvironment env, IHotelAdminRepository eHRepo, IRoomingListRepository eRLRepo)
-		{
-			_repo = repo;
-			_env = env;
-            _eHRepo = eHRepo;
-            _eRLRepo= eRLRepo;
-        }
-
-		[HttpGet]
-		public async Task<IActionResult> Index()
-		{
-			var EMCNO = HttpContext.Session.GetString("EventId") ?? "";
-
-			var vm = new ReportGroupsHT152Vm
-			{
-				EMCNO = EMCNO,
-				SelectedHotelId = "",
-				Comments = ""
-			};
-
-			var hotels = await _repo.BindHotelList(EMCNO);
-			vm.Hotels.Clear();
-			vm.Hotels.Add(new SelectItemVm("", "-- Select Hotel --"));
-			if (hotels != null) vm.Hotels.AddRange(hotels);
-
-			vm.EnsureDefaults();
-			return View(vm);
-		}
-
-		// ✅ Called when hotel changes (auto bind From/To)
-		[HttpPost]
-		public async Task<IActionResult> GetDefaultFromTo([FromBody] Ht152DefaultFromToRequestVm req)
-		{
-			req.EMCNO = HttpContext.Session.GetString("EventId") ?? req.EMCNO;
-			var USNNO = HttpContext.Session.GetString("USNNO") ?? "";
-
-			// 1) existing call to API (gets From/To + EMNNO resolved)
-			var result = await _repo.GetDefaultFromTo(req);
-			if (result == null) return Ok(null);
-
-            //  OVERRIDE only TO values with current datetime
-            if (result != null)
-            {
-                var now = DateTime.Now;
-
-                result.ToDate = now.ToString("MM/dd/yyyy", System.Globalization.CultureInfo.InvariantCulture);
-
-                var hour12 = now.Hour % 12;
-                if (hour12 == 0) hour12 = 12;
-
-                result.ToHour = hour12.ToString("00");
-                result.ToMin = now.Minute.ToString("00");
-                result.ToAmPm = now.Hour >= 12 ? "PM" : "AM";
-            }
-
-
-            // 2) ✅ also fetch history for this hotel
-            var history = await _repo.GetExportReportList(new ApiExportHistoryRequest
-			{
-				USNNO = USNNO,
-				EMNNO = result.EMNNO,
-				HTNNO = req.HotelId
-			});
-
-			result.History = history ?? new List<ReportRowVm>();
-
-			return Ok(result);
-		}
-
-
-
-        // ✅ Main: Generate New/Changed/Canceled, save pdf, insert EXPORT_REPORT_LIST, return history
-        [HttpPost]
-        public async Task<IActionResult> Process([FromBody] Ht152ProcessRequestVm req)
-        {
-            var EMCNO = HttpContext.Session.GetString("EventId") ?? "";
-            var USNNO = HttpContext.Session.GetString("USNNO") ?? ""; // adjust if your session key differs
-            var currentDate = DateTime.Now;
-            Guid UniqueId = Guid.NewGuid();
-
-            if (req.HotelId <= 0) return BadRequest("Hotel required");
-
-            var actions = new List<string>();
-            if (req.ChkNew) actions.Add("New");
-            if (req.ChkChanged) actions.Add("Changed");
-            if (req.ChkCanceled) actions.Add("Canceled");
-            if (actions.Count == 0) return BadRequest("Select at least one report type");
-
-            cls_HotelInfo obj = new cls_HotelInfo();
-            Hotel_Import_RFPID obj_root = new Hotel_Import_RFPID();
-            HotelApiDetail obj_details = new HotelApiDetail();
-            obj.HTNNO = req.HotelId;
-            var hotelDetails = await _eHRepo.GetHotelInfoList(obj);
-
-            string RFPID = hotelDetails[0].HTCRFP_ID;
-            //string RFPID = "720885";
-
-            var config = new ConfigurationBuilder().SetBasePath(Directory.GetCurrentDirectory()).AddJsonFile("appsettings.json").Build();
-            var url = Convert.ToString(config["RoomingHotelImportUrl"]);
-            var Token = Convert.ToString(config["RoomingHotelToken"]);
-            var Email = Convert.ToString(config["HotelEmail"]);
-            var Password = Convert.ToString(config["HotelPassword"]);
-            if (RFPID.Length > 0)
-            {
-                obj_root = await _eHRepo.callurl1(url + RFPID, Token, Email, Password);
-                if (obj_root == null)
-                {
-                }
-                else
-                {
-                    obj_details.HTNNO = req.HotelId;
-                    obj_details.EMCNOCode = EMCNO;
-                    obj_details.RFPID = obj_root.Response.RFPID;
-                    obj_details.HRCEmail = obj_root.Response.RoomingListCoordinatorEmail;
-                    obj_details.HotelSalesManagerEmail = obj_root.Response.HotelSalesManagerEmail;
-                    obj_details.Name = obj_root.Response.PropertyRoomListCoordinatorName;
-                    obj_details.Phone = obj_root.Response.PropertyRoomListCoordinatorPhone;
-                    var RoomingListDetails = await _eRLRepo.InsertUpdateHT152Hotel(obj_details);
-                }
-            }
-
-
-            HttpContextAccessor _httpContextAccessor = new HttpContextAccessor();
-            var context = _httpContextAccessor.HttpContext;
-
-            string ipAddress =
-                context?.Request.Headers["X-Forwarded-For"].FirstOrDefault()
-                ?? context?.Connection.RemoteIpAddress?.ToString();
-
-            if (!string.IsNullOrEmpty(ipAddress))
-            {
-                ipAddress = ipAddress.Split(',')[0].Trim();
-            }
-
-
-            var generated = new List<Ht152GeneratedItemVm>();
-
-            int resolvedEmnno = 0;
-            string htcacro = "";
-
-            foreach (var action in actions)
-            {
-                var apiReq = new ApiHt152ReportDataRequest
-                {
-                    Action = action,
-                    EMCNO = EMCNO,
-                    EMNNO = resolvedEmnno,     // 0 on first call; API can resolve from EMCNO
-                    HTNNO = req.HotelId,
-                    REPORTID = req.REPORTID,   // pass your legacy reportId if you have
-                    USER = USNNO,
-                    CurrentDate = currentDate,
-
-                    FromDate = req.FromDate,
-                    ToDate = req.ToDate,
-                    FrmHour = req.FrmHour,
-                    FrmMin = req.FrmMin,
-                    FrmAmPm = req.FrmAmPm,
-                    ToHour = req.ToHour,
-                    ToMin = req.ToMin,
-                    ToAmPm = req.ToAmPm,
-                    UNIQUEId = UniqueId,
-                    IPAddress= ipAddress
-                };
-
-                var apiResp = await _repo.GetReportData(apiReq);
-                if (apiResp == null) continue;
-
-                resolvedEmnno = apiResp.EMNNO;
-                htcacro = apiResp.HTCACRO;
-
-                // convert API rows -> DataTable for RDLC
-                var dt = ToDataTable(apiResp.Rows);
-
-                // pick RDLC + dataset name same as legacy
-                var (rdlcName, dsName) = action switch
-                {
-                    "New" => ("HT152_New.rdlc", "NewDataSet"),
-                    "Changed" => ("HT152_Changed.rdlc", "ChangedDataSet"),
-                    "Canceled" => ("HT152_Canceled.rdlc", "CanceledDataSet"),
-                    _ => throw new ArgumentOutOfRangeException()
-                };
-
-                // Adjust this path to where you store RDLC in Web project
-                var rdlcPath = Path.Combine(_env.ContentRootPath, "Forms", "Reports", rdlcName);
-
-                // legacy parameters dateFrom/dateTo
-                var fromDt = BuildDateTime(req.FromDate, req.FrmHour, req.FrmMin, req.FrmAmPm);
-                var toDt = BuildDateTime(req.ToDate, req.ToHour, req.ToMin, req.ToAmPm);
-
-                //var pdfBytes = RenderPdf_AspNetCoreReporting(rdlcPath, dsName, dt,
-                //    new Dictionary<string, string>
-                //    {
-                //	    ["dateFrom"] = fromDt.ToString("MM/dd/yyyy HH:mm"),
-                //	    ["dateTo"] = toDt.ToString("MM/dd/yyyy HH:mm")
-                //    });
-
-                // save to wwwroot/Forms/Reports/ReportsFolder (so url works)
-                var stamp = currentDate.ToString("MM-dd-yyyy HH-mm-ss");
-                var fileName = $"{EMCNO}_{htcacro}_{action}_{stamp} {req.ToAmPm}.pdf";
-                var relUrl = $"/Forms/Reports/ReportsFolder/{fileName}";
-
-                var folder = Path.Combine(_env.WebRootPath, "Forms", "Reports", "ReportsFolder");
-                Directory.CreateDirectory(folder);
-
-                var physicalPath = Path.Combine(folder, fileName);
-                //	await System.IO.File.WriteAllBytesAsync(physicalPath, pdfBytes);
-
-                // insert EXPORT_REPORT_LIST (same as legacy Global.InsertReportList)
-                await _repo.InsertReportList(new ApiInsertReportListRequest
-                {
-                    USNNO = USNNO,
-                    EMNNO = resolvedEmnno,
-                    HTNNO = req.HotelId,
-                    RPTURL = relUrl,          // store URL, not physical path
-                    RPTTYPE = action,
-                    CURRENTDATE = currentDate,
-                    UNIQUEId = UniqueId
-                });
-
-                generated.Add(new Ht152GeneratedItemVm
-                {
-                    Type = action,
-                    Url = relUrl,
-                    FileName = fileName
-                });
-            }
-
-            // refresh history list
-            var history = await _repo.GetExportReportList(new ApiExportHistoryRequest
-            {
-                USNNO = USNNO,
-                EMNNO = resolvedEmnno,
-                HTNNO = req.HotelId
-            });
-
-            return Ok(new { generated, history });
-        }
-
-
-        // ---------------- helpers ----------------
-
-        private static DateTime BuildDateTime(string mmddyyyy, string hour, string min, string ampm)
-		{
-			var d = DateTime.ParseExact(mmddyyyy, "MM/dd/yyyy", CultureInfo.InvariantCulture);
-
-			int h = int.Parse(hour);
-			int m = int.Parse(min);
-
-			// same legacy conversion
-			if (ampm == "PM" && h != 12) h += 12;
-			if (ampm == "AM" && h == 12) h = 0;
-
-			return new DateTime(d.Year, d.Month, d.Day, h, m, 0);
-		}
-
-		private static DataTable ToDataTable(List<Dictionary<string, object?>> rows)
-		{
-			var dt = new DataTable();
-			if (rows == null || rows.Count == 0) return dt;
-
-			// columns
-			foreach (var col in rows[0].Keys)
-				dt.Columns.Add(col);
-
-			// rows
-			foreach (var r in rows)
-			{
-				var dr = dt.NewRow();
-				foreach (var kv in r)
-					dr[kv.Key] = kv.Value ?? DBNull.Value;
-
-				dt.Rows.Add(dr);
-			}
-			return dt;
-		}
-
-        // ✅ RDLC PDF renderer (AspNetCore.Reporting)
-        //private static byte[] RenderPdf_AspNetCoreReporting(string rdlcPath, string dataSourceName, DataTable dt, Dictionary<string, string> parameters)
-        //{
-        //	var local = new LocalReport(rdlcPath);
-        //	local.AddDataSource(dataSourceName, dt);
-
-        //	var result = local.Execute(RenderType.Pdf, 1, parameters, out string mimeType);
-        //	return result.MainStream;
-        //}
-
-
-        [HttpPost]
-        public async Task<IActionResult> HotelDetailsWithRFP([FromBody] HotelRequest obj)
-        {
-
-            var RoomingListDetails = await _repo.HotelDetailsWithRFP(obj);
-            return Ok(RoomingListDetails);
-        }
-    }
-}
-
-
-
-
-Models
-
-using System;
-using System.Collections.Generic;
-
-namespace EventManagerWeb.Areas.Admin.Models
-{
-	public class ApiHt152ReportDataRequest
-	{
-		public string Action { get; set; } = ""; // New/Changed/Canceled
-		public string EMCNO { get; set; } = "";
-		public int EMNNO { get; set; } = 0;
-		public int HTNNO { get; set; }
-		public int REPORTID { get; set; } = 0;
-		public string USER { get; set; } = "";
-		public DateTime CurrentDate { get; set; }
-
-		// legacy UI fields
-		public string FromDate { get; set; } = "";
-		public string ToDate { get; set; } = "";
-		public string FrmHour { get; set; } = "12";
-		public string FrmMin { get; set; } = "00";
-		public string FrmAmPm { get; set; } = "AM";
-		public string ToHour { get; set; } = "12";
-		public string ToMin { get; set; } = "00";
-		public string ToAmPm { get; set; } = "AM";
-		public Guid UNIQUEId { get; set; }
-		public string IPAddress { get; set; }
-	}
-
-	public class ApiHt152ReportDataResponse
-	{
-		public int EMNNO { get; set; }
-		public string EMCNO { get; set; } = "";
-		public string HTCACRO { get; set; } = "";
-		public List<Dictionary<string, object?>> Rows { get; set; } = new();
-	}
-
-	public class ApiInsertReportListRequest
-	{
-		public string USNNO { get; set; } = "";
-		public int EMNNO { get; set; }
-		public int HTNNO { get; set; }
-		public string RPTURL { get; set; } = "";
-		public string RPTTYPE { get; set; } = ""; // New/Changed/Canceled
-		public DateTime CURRENTDATE { get; set; }
-		public Guid UNIQUEId { get; set; }
-	}
-
-	public class ApiExportHistoryRequest
-	{
-		public string USNNO { get; set; } = "";
-		public int EMNNO { get; set; }
-		public int HTNNO { get; set; }
-	}
-}
-
-
-
-
-another model
-
-using System;
-using System.Collections.Generic;
-
-namespace EventManagerWeb.Areas.Admin.Models
-{
-	public class Ht152DefaultFromToRequestVm
-	{
-		public string EMCNO { get; set; } = "";
-		public int HotelId { get; set; }   // HTNNO
-		public int EMNNO { get; set; } = 0; // optional (API can resolve via EMCNO)
-	}
-
-	public class Ht152DefaultFromToResponseVm
-	{
-		public int EMNNO { get; set; }
-		public string FromDate { get; set; } = ""; // MM/dd/yyyy
-		public string ToDate { get; set; } = "";   // MM/dd/yyyy
-		public string FrmHour { get; set; } = "12";
-		public string FrmMin { get; set; } = "00";
-		public string FrmAmPm { get; set; } = "AM";
-		public string ToHour { get; set; } = "12";
-		public string ToMin { get; set; } = "00";
-		public string ToAmPm { get; set; } = "AM";
-		public string CurrentDate { get; set; } = "";
-		public List<ReportRowVm> History { get; set; } = new List<ReportRowVm>();
-	}
-
-	public class Ht152ProcessRequestVm
-	{
-		public int HotelId { get; set; }
-		public string FromDate { get; set; } = "";
-		public string ToDate { get; set; } = "";
-
-		public string FrmHour { get; set; } = "12";
-		public string FrmMin { get; set; } = "00";
-		public string FrmAmPm { get; set; } = "AM";
-
-		public string ToHour { get; set; } = "12";
-		public string ToMin { get; set; } = "00";
-		public string ToAmPm { get; set; } = "AM";
-
-		public bool ChkNew { get; set; }
-		public bool ChkChanged { get; set; }
-		public bool ChkCanceled { get; set; }
-
-		public int REPORTID { get; set; } = 0; // if you have legacy REPORTID, pass it; else keep 0
-	}
-
-	public class Ht152GeneratedItemVm
-	{
-		public string Type { get; set; } = "";   // New/Changed/Canceled
-		public string Url { get; set; } = "";    // /Forms/Reports/ReportsFolder/xxx.pdf
-		public string FileName { get; set; } = "";
-	}
-
-    public class HotelWithREF
-    {
-        public string HTCRFPID { get; set; }
-        public int HTNNO { get; set; }
-        public string HTCDSC { get; set; }
-        public int EMNNO { get; set; }
-        public string EMCNO { get; set; } 
-    }
-    public class HotelRequest
-    {
-        public int HotelId { get; set; }
+ALTER PROCEDURE [dbo].[sp_ICM_RPT_EXPORT_ADDED_DATA_HT112_RDLC_112_RL]                               
+                                    
+@EMNNO int, @HTNNO int, @RGDTADD_FROM datetime, @RGDTADD_TO datetime,@REPORTID int,@user nvarchar(100),@CurrentDate datetime  ,@MultiHTNNO varchar(max) = NULL                                      
+-- =========================================================================================================        
+-- Author      : Sanaklp M        
+-- Create date : 15-Apr-2026        
+-- Modified By : Sanaklp M        
+-- Modified On : 15-Apr-2026        
+-- Modified By : Sanaklp M        
+-- Modified On : 15-Apr-2026        
+-- Procedure   : [dbo].[sp_ICM_RPT_EXPORT_ADDED_DATA_HT112_RDLC]        
+-- Database    : EXTERNAL ICM_REPORT_EXPORTS        
+--        
+-- Description :        
+--     Exports added reservation / rooming data hotel-wise and inserts related export history,        
+--     audit, and rooming log records.        
+--        
+-- Enhancement :        
+--     Added support for @MultiHTNNO as comma-separated HTNNO values.        
+--     When @MultiHTNNO is provided, procedure loops through each HTNNO and fetches related        
+--     EMNNO from HOTEL table, then executes existing logic for each hotel.        
+--     When @MultiHTNNO is NULL or empty, procedure works exactly as before using @EMNNO and @HTNNO.        
+--        
+-- IMPORTANT :        
+--     USE ONLY WITH EXTERNAL ICM_REPORT_EXPORTS DATABASE        
+-- =========================================================================================================        
+                                 
+As                                    
+begin try                                      
+                                    
+Set NoCount On                                    
+SET ANSI_WARNINGS OFF    
+  
+select 1  
+                                    
+declare @EncryptKey varchar(255)                                    
+declare @UseEncryption varchar(255)                                    
+DECLARE @HTNNOList TABLE (HTNNO INT)              
         
-    }
-}
+--exec master..xp_regread 'HKEY_LOCAL_MACHINE', 'SOFTWARE\EventManager\Encryption', 'EncryptKey', @EncryptKey output                                    
+--exec master..xp_regread 'HKEY_LOCAL_MACHINE', 'SOFTWARE\EventManager\Encryption', 'UseEncryption', @UseEncryption output                                    
+                                    
+if isnull(@UseEncryption,'') = '0'                                    
+ Begin                                    
+  select @UseEncryption = 0                                    
+ end                                    
+else                                    
+ Begin                                    
+  select @UseEncryption = cast(@UseEncryption as integer)                                    
+ end                                    
+                                    
+if isnull(@EncryptKey, '') = ''                                    
+ Begin                                    
+  select @EncryptKey = ''                                    
+ end                                    
+                                     
+declare @ScopeIdentity int                                                 
+declare @REF_ID nvarchar(50)                                  
+declare @USCLNAME nvarchar(100),@USCFNAME nvarchar(100)                                 
+set @USCLNAME=(select USCLNM USCLNAME from userinfo where usnno=@user)                    
+set @USCFNAME=(select USCFNM USCFNAME from userinfo where usnno=@user)                                                  
+set @REF_ID=(select HTCRFP_ID from hotel where htnno=@HTNNO)        
+        
+        
+		RETURN;
+        
+IF ISNULL(LTRIM(RTRIM(@MultiHTNNO)), '') = ''            
+BEGIN            
+    INSERT INTO @HTNNOList (HTNNO)            
+    VALUES (@HTNNO)            
+END            
+ELSE            
+BEGIN            
+    INSERT INTO @HTNNOList (HTNNO)            
+    SELECT DISTINCT TRY_CAST(LTRIM(RTRIM(Item)) AS INT)            
+    FROM SplitString(@MultiHTNNO, ',')   
+    WHERE TRY_CAST(LTRIM(RTRIM(Item)) AS INT) IS NOT NULL          
+         
+END          
+      select * from @HTNNOList  
+        
+WHILE EXISTS (SELECT 1 FROM @HTNNOList)            
+select 1 
+
+END try                                                          
+  BEGIN CATCH                                                                                           
+ INSERT INTO dbo.dbErrorLogs (UserName, ErrorNumber, ErrorState, ErrorSeverity, ErrorLine,                                                                                      
+ ErrorProcedure, ErrorMessage, ErrorOccuredOn)                                            
+ VALUES (SUSER_SNAME(), ERROR_NUMBER(), ERROR_STATE(), ERROR_SEVERITY(), ERROR_LINE(),                                                                    
+ ERROR_PROCEDURE(), ERROR_MESSAGE(), GETDATE())                                                                                                
+ select 0  as Result                                                                                                 
+  END CATCH
