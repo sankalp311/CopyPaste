@@ -1,538 +1,95 @@
-@using EventManagerWeb.Areas.Admin.Models
-@model EventManagerWeb.Areas.Admin.Models.RegistrationModel;
-@{
-     ViewData["Title"] = "Registration - Aco";
-     var registrationHotelList = ViewBag.objHotelList;
-     var _model = @Model;
-     var Rgnno = ViewBag.RGNNO;
-     var CC_type = ViewBag.cctype.obj_online;
-     var userAccessLevel = ViewBag.UserAccessLevel == null ? 0 : Convert.ToInt32(ViewBag.UserAccessLevel);
+ACO.cshtml
 
-     
+
+
+
     var rawAcoTime = Convert.ToString(_model?.objAcoList?.RGD_ACO_CREATE_TIME ?? "");
     var acoTimeParts = rawAcoTime.Split(new[] { "##" }, StringSplitOptions.None);
-
     var addedTime = acoTimeParts.Length > 0 ? acoTimeParts[0] : "";
     var lastUpdatedTime = acoTimeParts.Length > 1 ? acoTimeParts[1] : "";
 
 
-}
-<link href="~/assets/vendor/datatables/css/jquery.dataTables.min.css" rel="stylesheet">
-<link href="~/css/aco.css?v=@DateTime.Now.ToString("yyyyMMddhhmm")" rel="stylesheet" />
-
-<style>
-     .aco-time-title,
-     .aco-time-value {
-          text-align: left !important;
-          display: block;
-          width: 100%;
-     }
-
-     .aco-time-value {
-          font-weight: 600;
-          white-space: nowrap;
-          animation: slideInLeft 0.5s ease;
-     }
-
-     @@keyframes slideInLeft {
-          from {
-               opacity: 0;
-               transform: translateX(-18px);
-          }
-
-          to {
-               opacity: 1;
-               transform: translateX(0);
-          }
-     }
-</style>
-
-<div class="container-fluid">
-
-   
-
-    <div class="row">
-        <div class="col-lg-12">
-            <div class="card">
-                <div class="card-header flex-wrap">
-                    <h4 class="card-title" id="acoHead"></h4>
-                    @*<div>
-                        <label style="text-align:center;color:red;font-size:20px;" class="" id="CCErrorMsg" hidden>Please Enter a Valid CC number with Type</label>
-                        <label style="text-align:center;color:red;font-size:20px;" class="" id="CCErrorMsg1" hidden>Please select a  CC Type</label>
-                        <label style="text-align:center;color:red;font-size:20px;" class="" id="CCErrorMsg3" hidden>Please Enter the  CC Number</label>
-                        <label style="text-align:center;color:red;font-size:20px;" class="" id="CCErrorMsg4" hidden>Please Enter the  Expiry date</label>
-                        <label style="text-align:center;color:red;font-size:20px;" class="" id="CCErrorMsg5" hidden>Please Enter the  Card Name</label>
-                        <label style="text-align:center;color:red;font-size:20px;" class="" id="CCErrorMsg6" hidden>Please Enter the  Valid CC Number</label>
-                        <input type="text" class="form-control" id="ccnum" maxlength="18" value="@_model.objAcoList.RGC_ACO_CC" hidden>
-
-                    </div>*@
-                         <input type="text" class="form-control" id="accessflag" maxlength="18" value="@userAccessLevel" hidden>
-                         <input type="text" class="form-control" id="addedname" maxlength="18" value="@_model.objAcoList.RGC_ACO_CCNAME" hidden>
-                         <input type="text" class="form-control" id="addedreq" maxlength="18" value="@_model.objAcoList.RGC_ACO_ADD_REQUEST" hidden>
-                         
-                         
-
-                <div class="d-flex">
-                    <button onclick="BacktoRegistrationList()" class="btn btn-dark me-2" type="button">
-                        <i class="fas fa-arrow-left me-3"></i> Go To List
-                    </button>
-                    <input onclick="UndoforPage(@Rgnno);" type="button" value="Undo" class="btn btn-info me-2">
-                    <input type="button" onclick="SaveAco(@Rgnno)" value="Save" class="btn btn-info me-2">
-                    <div class="dropdown drp-1">
-                        <button type="button" class="btn btn-primary dropdown-toggle" data-toggle="dropdown" data-display="static" aria-expanded="false">
-                           ACO
-                        </button>
-                        <div class="dropdown-menu drp-m-1">
-                            <a href="/Admin/Registration/EditRegistration?RGNNO=@Rgnno" class="dropdown-item">Registration Info</a>
-                            <a onclick="EditRegRes(@Rgnno)" class="dropdown-item">Reservation</a>
-                             <a onclick="EditRegtionFinance(@Rgnno)" class="dropdown-item">Finance</a>
-
-                            <a href="/Admin/Registration/Activities?RGNNO=@Rgnno" @*onclick="EditRegistration(@Model2.RGNNO)"*@ class="dropdown-item">Activities</a>
-
-                            @*    <a href="/Admin/Registration/Travel?RGNNO=@Rgnno" class="dropdown-item">Travel</a>*@
-
-                        </div>
-                    </div>
-                </div>
-                </div>
-                <div class="row">
-                    <div class="col-md-8 mb-1">
-                        <label></label>
-                    </div>
-                    <div class="col-md-4 mb-1 text-end">
-                        <label for="lastName" class="form-label1 me-4 ">Note* Bold Labels are mandatory fields.</label>
-                    </div>
-                </div>
-                <div class="card-body">
-                     <form class="needs-validation" novalidate="">
-                        <div class="col-md-12">
-                            <div class="row">
-                                        <div class="col-md-1 mb-3">
-                                             <label class="aco-time-title">Added</label>
-                                        </div>
-
-                                        <div class="col-md-2 mb-3">
-                                             <label id="lblAddedTime" class="aco-time-value">@addedTime</label>
-                                             <div class="invalid-feedback">
-                                                  Valid first name is required.
-                                             </div>
-                                        </div>
-
-                                        <div class="col-md-1 mb-3">
-                                             <label class="aco-time-title">Last Updated</label>
-                                        </div>
-
-                                        <div class="col-md-2 mb-3">
-                                             <label id="lblLastUpdatedTime" class="aco-time-value">@lastUpdatedTime</label>
-                                             <div class="invalid-feedback">
-                                                  Valid first name is required.
-                                             </div>
-                                        </div>
-
-                                        <!-- hidden field: this will send Added##LastUpdated -->
-                                        <input type="hidden"
-                                               id="RGD_ACO_CREATE_TIME"
-                                               name="RGD_ACO_CREATE_TIME"
-                                               value="@rawAcoTime" />
-                                <div class="col-md-1 mb-3">
-                                    <label for="lastName" class="">Hotel</label>
-                                </div>
-                                <div class="col-md-5 mb-3">
-                                    @*<input type="text" class="form-control" id="RGN_ACO_HTNNO" placeholder="" maxlength="15" value="" required="">*@
-                                    <select asp-for="@_model.objAcoList.RGN_ACO_HTNNO" name="RGN_ACO_HTNNO"  id="RGN_ACO_HTNNO"  class="default-select form-control wide w-100">
-                                        <option value="0">---Select---</option>
-										@foreach (var hotellist in @registrationHotelList)
-                                        {
-                                            <option value="@hotellist.HTNNO">@hotellist.HTCDSC</option>
-                                        }
-                                    </select>
-                                    <div class="invalid-feedback">
-                                        Valid last name is required.
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-1 mb-3">
-                                    <label for="firstName" class="">Arrive</label>
-                                </div>
-                                <div class="col-md-5 mb-3">
-                                    <input type="text" class="icm-calendar form-control" id="RGD_ACO_ARR" maxlength="10" placeholder="" value="@_model.objAcoList.RGD_ACO_ARR" required="">
-                                    <div class="invalid-feedback">
-                                        Valid first name is required.
-                                    </div>
-                                </div>
-                                <div class="col-md-1 mb-3">
-                                    <label for="lastName" class="">Depart</label>
-                                </div>
-                                <div class="col-md-5 mb-3">
-                                    <input type="text" class="icm-calendar form-control" id="RGD_ACO_DEP" placeholder="" maxlength="10" value="@_model.objAcoList.RGD_ACO_DEP" required="">
-                                    <div class="invalid-feedback">
-                                        Valid last name is required.
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-1 mb-3 text-end">
-                                    <label for="firstName" class=""># of Rooms</label>
-                                </div>
-                                <div class="col-md-5 mb-3">
-                                    <input type="text" class="form-control" id="RGN_ACO_ROOMS" maxlength="4" placeholder="" value="@_model.objAcoList.RGN_ACO_ROOMS" required="">
-                                    <div class="invalid-feedback">
-                                        Valid first name is required.
-                                    </div>
-                                </div>
-                                <div class="col-md-1 mb-3 text-end">
-                                    <label for="lastName" class="">Block Code</label>
-                                    </div>
-                                    <div class="col-md-5 mb-3">
-                                    <input type="text" class="form-control" id="RGC_ACO_BLOCKCODE" placeholder="" maxlength="21" value="@_model.objAcoList.RGC_ACO_BLOCKCODE" required="">
-                                    <div class="invalid-feedback">
-                                        Valid last name is required.
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="row">
-                                <div class="col-md-1 mb-3 text-end">
-                                    <label for="firstName" class="">Request Status</label>
-                                </div>
-                                <div class="col-md-5 mt-1 mb-3">
-                                   @* <input type="text" class="form-control" id="RGC_ACO_STATUS" maxlength="15" placeholder="" value="" required="">*@
-                                    <select asp-for="@_model.objAcoList.RGC_ACO_STATUS" name="RGC_ACO_STATUS" id="RGC_ACO_STATUS" class="default-select form-control wide w-100">
-                                        <option value="">Select</option>
-                                        <option value="New">New</option>
-                                        <option value="Pending">Pending</option>
-                                        <option value="Lost">Lost</option>
-                                        <option value="Confirmed">Confirmed</option>
-                                        <option value="Completed">Completed</option>
-                                        <option value="Other">Other</option>
-                                    </select>
-                                    <div class="invalid-feedback" id="RequestAcoErrMsg">
-                                        <b style="color:red;font-weight:bold;">Please select a valid request status.</b>
-</div>
-                                </div>
-                                <div class="col-md-1 mb-3 text-end">
-                                <label for="firstName" class="">Add. Request</label>
-                                </div>
-                                <div class="col-md-5 mt-1 mb-3">
-                                @*<input type="text" class="form-control" id="RGC_ACO_ADD_REQUEST" maxlength="15" placeholder="" value="" required="">*@
-                                <select asp-for="@_model.objAcoList.RGC_ACO_ADD_REQUEST" name="RGC_ACO_ADD_REQUEST" id="RGC_ACO_ADD_REQUEST" class="default-select form-control wide w-100">
-                                    <option value="">Select</option>
-                                    <option value="Aco">Aco</option>
-                                    <option value="Suite_Upgrade">Suite Upgrade</option>
-                                    <option value="Shoulder_Nights">Shoulder Nights</option>
-                                </select>
-                                <div class="invalid-feedback" id="AddRequestAcoErrMsg">
-                                    <b style="color: red; font-weight: bold">Please select a valid Add. request.</b>
-                                </div>
-                            </div>
-                            </div>
-
-                            <div class="row">
-                                 <div class="col-md-1 mt-3 mb-3">
-                                    <label for="lastName" class="">Agent Notes</label>
-                                </div>
-                                <div class="col-md-11 mb-3">
-                                    <textarea id="RGC_ACO_AGENT_NOTES" class="form-control">@_model.objAcoList.RGC_ACO_AGENT_NOTES</textarea>
-                                    <div class="invalid-feedback">
-                                        Valid last name is required.
-                                    </div>
-                                </div>
-                            </div>
 
 
-                            <input type="hidden" id="hid_VGSAccountId" value="tntonfxpov4" />
 
-                            <div class="row">
-                                <div class="col-md-1  mt-3 mb-3">
-                                    <label for="firstName" class="">Spcl Request</label>
-                                    </div>
-                                    <div class="col-md-11 mb-3">
-                                        <textarea id="RGC_ACO_SPCL_REQUESTS" class="form-control">@_model.objAcoList.RGC_ACO_SPCL_REQUESTS</textarea>
-                                    <div class="invalid-feedback">
-                                        Valid first name is required.
-                                    </div>
-                                </div>
-                            </div>
-                                   <div id="ccSectionContainer" class="_RmHid">
-                            <div class="section-header _RmHid" id="viewActions">
-                            <h3 class="mt-4 pb-0 fs-22 text-black " style="margin-bottom: 0px;">Credit Card Information</h3>
-                            <hr style="margin-top: 5px;background-color: #234c7278;opacity: 1;">
-                            @* <h3 class="mt-4 mb-4 fs-24 text-black form-heading">Credit Card Information</h3> *@
-                            <input type="button" onclick="ShowAcoCardNumber(@Rgnno)" id="viewBtn" value="View Card Details" class="btnview1 btn-view">
-                            </div>
-                            <div class="row">
-                                <div class="col-md-1 mb-3">
-                                    <label for="firstName" class="form-label">Type</label>
-                                    </div>
-                                    <div class="col-md-5 mb-3">
-                                        <select asp-for="@_model.objAcoList.RGC_ACO_CCTYPE" name="RGC_ACO_CCTYPE" id="RGC_ACO_CCTYPE" class="default-select form-control wide w-100">
-                                        <option value="">None</option>
+<div class="row align-items-center">
+    <div class="col-md-6">
+        <div class="row align-items-center">
+            <div class="col-md-2 mb-3 text-end">
+                <label class="mb-0">Added</label>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div id="lblAddedTime" class="aco-meta-value">@addedTime</div>
+            </div>
 
-                                        @foreach (var CCtype in @CC_type)
-                                        {
-                                            @if (@CCtype.OnlinePayment != "NOCCTYPE")
-                                            {
-                                                @if (@CCtype.OnlinePayment == "AX")
-                                                {
-                                                    <option value="@CCtype.OnlinePayment">Amer Exp</option>
-                                                }
-                                                @if (@CCtype.OnlinePayment == "DN")
-                                                {
-                                                    <option value="@CCtype.OnlinePayment">Diners Club</option>
-                                                }
-                                                @if (@CCtype.OnlinePayment == "DS")
-                                                {
-                                                    <option value="@CCtype.OnlinePayment">Discover</option>
-                                                }
-                                                @if (@CCtype.OnlinePayment == "ER")
-                                                {
-                                                    <option value="@CCtype.OnlinePayment">ENRoute</option>
-                                                }
-                                                @if (@CCtype.OnlinePayment == "JC")
-                                                {
-                                                    <option value="@CCtype.OnlinePayment">JCB</option>
-                                                }
-                                                @if (@CCtype.OnlinePayment == "MC")
-                                                {
-                                                    <option value="@CCtype.OnlinePayment">MasterCard</option>
-                                                }
-                                                @if (@CCtype.OnlinePayment == "VI")
-                                                {
-                                                    <option value="@CCtype.OnlinePayment">Visa</option>
-                                                }
+            <div class="col-md-2 mb-3 text-end">
+                <label class="mb-0">Last Updated</label>
+            </div>
+            <div class="col-md-4 mb-3">
+                <div id="lblLastUpdatedTime" class="aco-meta-value">@lastUpdatedTime</div>
+            </div>
+        </div>
+    </div>
 
-                                            }
-                                        }
-                                            @* <option value="">NONE</option>
-                                            <option value="AX">Amer Exp</option>
-                                            <option value="DN">Diners Club</option>
-                                            <option value="DS">Discover</option>
-                                            <option value="ER">ENRoute</option>
-                                            <option value="JC">JCB</option>
-                                            <option value="MC">MasterCard</option>
-                                            <option value="VI">Visa</option> *@
-                                        </select>
-                                    <span class="error text-start" style="width:100%" id="CCErrorMsg1" hidden>Please select a  CC Type</span>
-                                        <div class="invalid-feedback">
-                                        Valid first name is required.
-                                    </div>
-                                </div>
-                                <div class="col-md-1 mb-3">
-                                        <label for="lastName" class="form-label">CC#</label>
-                                    </div>
-                                    <div class="col-md-5 mb-3">
-
-                                    <input type="text" class="form-control" id="RGC_ACO_CC" maxlength="16" value="@(_model.objAcoList.ACCCRDNO)" onselectstart="return false" onpaste="return false;" onCopy="return false" onCut="return false" onDrag="return false" onDrop="return false" autocomplete=off>
-                                    
-                                    <div id="cardNumber" name="cardno" class="form-control form-control1 _RmHid"></div>
-                                    <div id="cc-number" name="cardno" class="form-control form-control1 cc-number-edit _RmHid"></div>
-                                    <div id="cc-numberview" name="cardno" class="form-control form-control1 cc-number-view _RmHid"></div>
-                                    <input type="hidden" class="form-control form-control1l" id="RSCCCNOTemp" placeholder="" value="@_model.objAcoList.RGC_ACO_CC">
-                                    <input type="hidden" id="hid_token" value="@_model.objAcoList.RGC_ACO_CC" />
-                                    <input type="hidden" id="hid_IsEdit" value="0" />
-                                    <input type="hidden" id="hid_cctype" value="@_model.objAcoList.TYPE" />
-                                        <span class="error text-start" style="width:100%" id="CCErrorMsg6" hidden>Please Enter the  CC Number</span>
-                                    <span class="error text-start" style="width:100%" id="CCErrorMsg" hidden>Please Enter a Valid CC number with Type</span>
-                                    <div class="invalid-feedback">
-                                        Valid last name is required.
-                                    </div>
-                                </div>
-                               @*  <div class="col-md-1 mb-1">
-                                    <label for="lastName" class="form-label">CVV on Card</label>
-                                </div>
-
-                                <div class="col-md-3 mb-1">
-
-                                    <input type="text" class="form-control" id="RGC_ACO_CCCVV" onkeypress="return isNumber(event)" placeholder="" maxlength="4" value="@_model.objAcoList.RGC_ACO_CCCVV">
-                                    <span class="error text-start" style="width:100%" id="RegACO_CCCVVError" hidden="">Please Enter CVV Number</span>
-                         
-
-                                    <div class="invalid-feedback">
-                                        Valid last name is required.
-                                    </div>
-                                </div> *@
-                               @*  <div class="col-md-1 mb-1" style="text-align:initial;font-size:16px;text-decoration:underline;color:black; display:none" >
-                                    <div>
-                                        <label onclick="ShowAcoCardNumber(@Rgnno);" id="RegEditCCID" style="cursor: pointer;">Edit CC</label>
-                                    </div>
-                                </div> *@
-
-                            </div>
-                            <div class="row">
-
-                                <div class="col-md-1 mb-1">
-                                    <label for="lastName" class="form-label">CVV on Card</label>
-                                </div>
-
-                                <div class="col-md-2 mb-1">
-                                    <div id="cardVerificationCode" name="CVVCode" class="form-control _RmHid"></div>
-                                    <input type="text" class="form-control" id="RGC_ACO_CCCVV" onkeypress="return isNumber(event)" placeholder="" maxlength="4" value="@_model.objAcoList.RGC_ACO_CCCVV">
-                                    <span class="error text-start" style="width:100%" id="RegACO_CCCVVError" hidden="">Please Enter CVV Number</span>
-
-                                    <input type="hidden" class="form-control form-control1l" id="RSCCCNOTempRes" placeholder="" value="@_model.objAcoList.RGC_ACO_CCCVV">
-                                    <div class="invalid-feedback">
-                                        Valid last name is required.
-                                    </div>
-                                </div>
-
-                                <div class="col-md-1 mb-3 text-end">
-                                    <label for="firstName" class="form-label">CC Exp</label>
-                                    </div>
-                                    <div class="col-md-2 mb-3">
-                                        <input type="text" class="form-control" id="RGC_ACO_CCEXP" maxlength="5" placeholder="MM/YY" onkeypress="return isNumber(event)" value="@_model.objAcoList.RGC_ACO_CCEXP">
-                                    <span class="error text-start" style="width:100%" id="CCErrorMsg4" hidden>Please Enter the  Expiry date</span>
-                                        <div class="invalid-feedback">
-                                        Valid first name is required.
-                                    </div>
-                                </div>
-                                <div class="col-md-1 mb-3 text-end">
-                                    <label for="lastName" class="form-label">Card Name</label>
-                                    </div>
-                                    <div class="col-md-5 mb-3">
-                                        <input type="text" class="form-control" id="RGC_ACO_CCNAME" placeholder="" maxlength="70" value="@_model.objAcoList.RGC_ACO_CCNAME">
-                                    <span class="error text-start" style="width:100%" id="CCErrorMsg5" hidden>Please Enter the  Card Name</span>
-                                        <div class="invalid-feedback">
-                                        Valid last name is required.
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="actions _RmHid" id="deleteActions">
-                                <span class="edit-message">Need to edit this card?</span>
-                                <input type="button" class="btnview1 btn-delete" id="btnDeleteCard" onclick="deletecardnew()" value="Delete and Re-enter">
-                            </div>
-                         
-                            </div>
-                            
-                            <div class="row">
-                            <div class="col-lg-12">
-                                <hr class="mb-4">
-                                <button onclick="BacktoRegistrationList()" class="btn btn-dark  mb-2" type="button">
-                                    <i class="fas fa-arrow-left me-3"></i> Back
-                                </button>
-                                    <input type="button" onclick="SaveAco(@Rgnno)" value="Save" id="" class="btn btn-info  float-md-end mb-2" />
-                                @* <button class="btn btn-info btn-lg float-md-end mb-2" type="submit">
-                                Save
-                                </button>*@
-                                <button onclick="BacktoRegistrationList()" class="btn btn-dark  float-md-end mb-2 me-3" type="button">
-                                    <span class="me-3"><i class="fa fa-times"></i></span> Cancel
-                                </button>
-                            </div>
-                        </div>
-                        </div>
-                    </form>
+    <div class="col-md-6">
+        <div class="row align-items-center">
+            <div class="col-md-2 mb-3 text-end">
+                <label for="RGN_ACO_HTNNO" class="mb-0">Hotel</label>
+            </div>
+            <div class="col-md-10 mb-3">
+                <select asp-for="@_model.objAcoList.RGN_ACO_HTNNO"
+                        name="RGN_ACO_HTNNO"
+                        id="RGN_ACO_HTNNO"
+                        class="default-select form-control wide w-100">
+                    <option value="0">---Select---</option>
+                    @foreach (var hotellist in @registrationHotelList)
+                    {
+                        <option value="@hotellist.HTNNO">@hotellist.HTCDSC</option>
+                    }
+                </select>
+                <div class="invalid-feedback">
+                    Valid last name is required.
                 </div>
             </div>
         </div>
     </div>
 
-
-    <div class="sv-overlay" id="svOverlay" aria-modal="true" role="dialog" aria-labelledby="svTitle" hidden>
-        <div class="sv-modal">
-            <div class="sv-header">
-                <div class="sv-icon" aria-hidden="true">
-                    <!-- Inline SVG lock (no external libs needed) -->
-                    <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
-                        <path d="M17 9h-1V7a4 4 0 0 0-8 0v2H7a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-7a2 2 0 0 0-2-2Zm-7-2a2 2 0 1 1 4 0v2H10V7Zm7 11H7v-7h10v7Z" />
-                    </svg>
-                </div>
-
-                <div class="sv-title-wrap">
-                    <h2 id="svTitle">Secure Verification</h2>
-                    <p>Access your reservation securely</p>
-                </div>
-            </div>
-
-            <div class="sv-body">
-                <div class="sv-callout">
-                    <h3>Account Verification Required</h3>
-                    <p>
-                        For security, editing a ACO requires a one-time password (OTP).
-                    </p>
-                    <p>
-                        <b>Click here to request a 4-digit verification code</b> sent to your registered email.
-                    </p>
-                    <p>
-                        To protect your account, any changes to a ACO must be confirmed with a one‑time password (OTP).
-                    </p>
-
-                    @* <p>For your security, we've sent a 4-digit verification code to your registered email address. Please enter it below to proceed with accessing your reservation details.</p> *@
-                </div>
-                <div id="otp_Send">
-                    <button type="button" id="otpsend_window" onclick="SendOtp()" class="sv-primary-btn">Send OTP Code</button>
-                </div>
-                <div id="otp_window">
-                    <label class="sv-label">Verification Code</label>
-                    <div class="sv-otp-row" id="svOtpRow" aria-label="Enter 4 digit code">
-                        <input type="text" maxlength="1" class="sv-otp-input" inputmode="numeric" />
-                        <input type="text" maxlength="1" class="sv-otp-input" inputmode="numeric" />
-                        <input type="text" maxlength="1" class="sv-otp-input" inputmode="numeric" />
-                        <input type="text" maxlength="1" class="sv-otp-input" inputmode="numeric" />
-                    </div>
-
-                    <div id="svHelp" class="sv-help">("OTP sent to your email." : "Please enter the 4-digit verification code sent to your email")</div>
-
-                    <button type="button" id="svVerifyBtn" class="sv-primary-btn" onclick="verifiedMFA()">Verify &amp; Continue</button>
-
-                    <div class="sv-resend">
-                        Didn’t receive the code?
-                        <button type="button" id="svResendBtn" class="sv-link" onclick="Resend()">Resend Code</button>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <input type="hidden"
+           id="RGD_ACO_CREATE_TIME"
+           name="RGD_ACO_CREATE_TIME"
+           value="@rawAcoTime" />
 </div>
 
 
 
+registration.js
+l.no. - 2631
 
-@*<div class="ui container">
-    <div id="mainContainer" class="ui compact basic left aligned segment" style="min-width:400px; margin:auto;">
-        <div class="ui yellow inverted segment">
-            <h3 class="ui top attached tertiary basic segment">
-                Payment Details
-                <span style="float:right;">
-                    <i class="american express large icon"></i>
-                    <i class="diners club large icon"></i>
-                    <i class="discover large icon"></i>
-                    <i class="japan credit bureau large icon"></i>
-                    <i class="mastercard large icon"></i>
-                    <i class="visa large icon"></i>
-                </span>
-            </h3>
-            <form class="ui payment form attached segment" id="payment-form" method="post">
-                <input style="display:none" />
-                <div class="field">
-                    <label>Card Number</label>
-                    <div class="ui icon input">
-                        <i class="credit card alternative icon "></i>
-                        <input type="tel" id="cc-number" placeholder="•••• •••• •••• ••••" data-payment='cc-number'>
-                    </div>
-                </div>
-                <div class="field">
-                    <label>CVC</label>
-                    <input type="password" id="cc-cvc" placeholder="•••" data-payment='cc-cvc'>
-                </div>
-                <div class="field">
-                    <label>Card Expiry (MM/YYYY)</label>
-                    <input type="tel" id="cc-exp" placeholder="•• / ••••" data-payment='cc-exp'>
-                </div>
-                <div class="ui error message"></div>
-            </form>
-        </div>
-    </div>
-</div>*@
-
-<script src="~/lib/jquery/jquery-3.3.1.min.js"></script>
-
-<script type="text/javascript" src="@Url.Content("~/js/Admin/Registration.js")?v=@DateTime.Now.ToString("yyyyMMddhhmm")"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
-<script src="~/assets/vendor/datatables/js/jquery.dataTables.min.js"></script>
-<script src="~/assets/js/plugins-init/datatables.init.js"></script>
-<link rel="stylesheet" href="~/assets/vendor/toastr/css/toastr.min.css">
-<script src="~/js/plugins-init/toastr-init.js"></script>
-<script src="~/assets/vendor/toastr/js/toastr.min.js"></script>
-<script src="~/js/admin/globalmessage.js"></script>
-<script src="https://js.basistheory.com/web-elements/2.7.0/index.js" integrity="sha384-LMw8Ye6nVnn+KIekK26PsWrZO3ycLLqF3/7CHvqMBzc8t39sYMJbbe3zYwMQQbiI" crossorigin="anonymous"></script>
-<script nonce="static-nonce" src="https://js.verygoodvault.com/vgs-collect/2.18.0/vgs-collect.js"></script>
-<script type="text/javascript" src="https://js.verygoodvault.com/vgs-show/2.2.2/show.js" integrity="sha384-70nFlhYfZpPZ0nh4E9kRCT2HXORAKatDFQXQP8Dxq8motfd35aSMMu9g6VE/oAIV" crossorigin="anonymous"></script>
+ RGD_ACO_CREATE_TIME: ($("#lblAddedTime").text().trim() || "") + "##" +($("#lblLastUpdatedTime").text().trim() || ""),
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ -- sp
+ 
+ sp_helptext usp_icm_getAcoDetailsby_RGNNO
+ 
+  ISNULL(CONVERT(VARCHAR(19), RGD_ACO_CREATE_TIME, 101) + ' ' + CONVERT(VARCHAR(8), RGD_ACO_CREATE_TIME, 108), '')
+    + '##' +
+    ISNULL(CONVERT(VARCHAR(19), RGC_ACO_LASTUPDATED, 101) + ' ' + CONVERT(VARCHAR(8), RGC_ACO_LASTUPDATED, 108), '')
+    AS RGD_ACO_CREATE_TIME,
+	
+	
+	
+	sp_helptext usp_icm_Update_RegistrationAcoDtl
+	
+	RGC_ACO_LASTUPDATED = CASE 
+                            WHEN RGC_ACO_LASTUPDATED IS NULL THEN GETDATE()
+                            ELSE RGC_ACO_LASTUPDATED
+                          END
+						  
+						  
+						  
