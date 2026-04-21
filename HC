@@ -1,439 +1,176 @@
-CREATE PROCEDURE [dbo].[SP_ICM_ACO_DETAILS_HT156RDLC]       
- @STATUS NVARCHAR(30) = ''      
- ,@FROM DATETIME = NULL      
- ,@TO DATETIME = NULL      
- ,@ADDREQUEST NVARCHAR(25) = NULL      
-AS      
-BEGIN      
- IF (@FROM IS NOT NULL)      
- BEGIN      
-  SET @TO = dateadd(dd, 1, @TO)      
- END      
+                           
+SELECT  -- top 1                                        
+    --ISNULL(CONVERT(varchar(30), ERL.ERLNNO), '') AS ERLNNO,                                          
+    ISNULL(CONVERT(varchar(30), ERL.EMNNO), '') AS EMNNO,                                                    
+    ISNULL(CONVERT(varchar(30), ERL.HTNNO), '') AS HTNNO,                                                    
+    ISNULL(EVT.EMCNM, '') AS EMCNO,                                         
+ ISNULL(CONVERT(varchar(11),EVT.EMDTBEG, 106), '') AS StartDate,                                        
+ ISNULL(CONVERT(varchar(11),EVT.EMDTEND, 106), '') AS EndDate,                                        
+    ISNULL(HREH.HHN_RFP_ID, '') AS HHN_RFP_ID,                                                    
+    ISNULL(HREH.HHC_HOTEL_NAME, '') AS HHC_HOTEL_NAME,                                             
+                                            
+    ISNULL(CONVERT(varchar(11), HREH.HHDT_FROM, 106), '') AS HHDT_FROM,                                                    
+    ISNULL(CONVERT(varchar(11), HREH.HHDT_TO, 106), '')   AS HHDT_TO,                                                    
+    --CONVERT(varchar(30),HREH.HHDT_RUNTIME)as CurrentTime,                                               
+  CONVERT(varchar(23),                                              
+       CAST(HREH.HHDT_RUNTIME AS datetime),                                              
+       121) as CurrentTime,                                              
+    CONVERT(varchar(30),                                                      
+       FORMAT(HREH.HHDT_RUNTIME, 'MM/dd/yyyy hh:mm:ss tt')                                                      
+) HHDT_RUNTIME,                                               
+                                                
+    --ISNULL(MAX(CASE WHEN ERL.RPTTYPE = 'New' THEN 'New' END), '')        AS RPTTYPE_NEW,                                                    
+    --ISNULL(MAX(CASE WHEN ERL.RPTTYPE = 'Changed' THEN 'Changed' END), '') AS RPTTYPE_CHANGED,                                                    
+    --ISNULL(MAX(CASE WHEN ERL.RPTTYPE = 'Canceled' THEN 'Canceled' END), '') AS RPTTYPE_CANCELED,                                                
+                                            
+    ISNULL(CONVERT(varchar(30), RC.NewCount), '0')  AS NewCount,                                            
+    ISNULL(CONVERT(varchar(30), RC.ChangedCount), '0') AS ChangedCount,                                            
+    ISNULL(CONVERT(varchar(30), RC.CanceledCount), '0') AS CanceledCount,                                            
+                                            
+    COALESCE(RLL.Mode,                                            
+        CASE     
+            WHEN ISNULL(RC.NewCount,0)                                            
+         + ISNULL(RC.ChangedCount,0)                                            
+               + ISNULL(RC.CanceledCount,0) = 0                                            
+            THEN 'Empty'              
+            ELSE 'imported'                                            
+        END                         
+    ) AS Mode,                                      
+                            
+ ISNULL(RLN.RoomListNote, '') AS RoomListNote,                            
+                               
+ ISNULL(RLN.RoomListNoteCreatedBy, '') AS RoomListNoteCreatedBy,                            
+                            
+ ISNULL(RLN.Email, '') AS Email,                              
+                            
+ISNULL(CONVERT(varchar(30),                      
+       FORMAT(RLN.CreatedDate, 'MM/dd/yyyy hh:mm:ss tt')                            
+),'') AS RoomListNoteCreatedDate,                            
+                        
+                              
+                                
+ ISNULL(CONVERT(varchar(30), RLL.IsConfirm), '0') AS isConfirm,                                  
+ISNULL(RSED.IsDisabledEmail, 0) AS IsDisabledEmail,                                  
+ ISNULL(CONVERT(varchar(30),                                                      
+       FORMAT(RLL.CreatedDate, 'MM/dd/yyyy hh:mm:ss tt')                                                      
+),'') UpdateDate,                          
+                        
+ISNULL(CONVERT(varchar(30),                                                      
+       FORMAT(RSED.ExpireTime, 'MM/dd/yyyy hh:mm:ss tt')                                                      
+),'') ExpireDate,                        
+                        
+isnull(CONVERT(varchar(30),DATEDIFF(DAY, RLL.CreatedDate, GETDATE())),'') AS DaysDiff,                                  
+ --ISNULL(CONVERT(varchar(30), RLL.CreateListTime), '0')                                  
+ isnull(HT152.REFID,'') as REFID,          
+isnull(HT152.HRCEmail,'') as HRCEmail,          
+isnull(HT152.HSMEmail,'') as HSMEmail,          
+isnull(HT152.Name,'')as Name,          
+isnull(HT152.Phone,'') as Phone ,      
+isnull( HREH.GUID_,'') as GUID       
+           
+FROM [HOTEL_REPORT_EXPORT_HISTORY] HREH                                            
+                                            
+INNER JOIN [EXPORT_REPORT_LIST] ERL                                            
+    ON ERL.HTNNO = HREH.EXC_HTNNO and ERL.CURRENTDATE=   HREH.HHDT_RUNTIME                                         
+                                            
+ LEFT JOIN EVENTS EVT                                      
+    ON EVT.EMCNO = ERL.EMCNO            
+LEFT JOIN  HT152_HotelRecords  HT152          
+  on HT152.EMCNO = ERL.EMCNO and HT152.REFID=HREH.HHN_RFP_ID                                       
+-- ?? Correct counts (NO duplication, FIXED)                                            
+LEFT JOIN                                            
+(                                            
+    SELECT                                            
+        HER.EXDT_RUNTIME,                                            
+                                            
+        SUM(CASE                                             
+                WHEN ERPL.RPTTYPE = 'New'                                            
+                 AND HER.EXC_REPORT_TYPE = 'A'                                            
+                THEN 1 ELSE 0                                             
+ END) AS NewCount,                                            
+                                            
+        SUM(CASE                                             
+                WHEN ERPL.RPTTYPE = 'Changed'                                            
+                 AND HER.EXC_REPORT_TYPE = 'C'                                            
+                THEN 1 ELSE 0                                             
+            END) AS ChangedCount,                                            
+                        
+        SUM(CASE                                             
+                WHEN ERPL.RPTTYPE = 'Canceled'                     
+                 AND HER.EXC_REPORT_TYPE = 'X'      
+                THEN 1 ELSE 0                                             
+            END) AS CanceledCount                         
+                                            
+   FROM HOTEL_EXPORT_REPORTS HER                                            
+    INNER JOIN EXPORT_REPORT_LIST ERPL                                            
+        ON ERPL.CURRENTDATE = HER.EXDT_RUNTIME                                    
+                                            
+    GROUP BY HER.EXDT_RUNTIME                                            
+) RC                                            
+    ON RC.EXDT_RUNTIME = HREH.HHDT_RUNTIME                                            
+                                            
+-- ?? Mode from log table                                            
+--LEFT JOIN RoomingList_Log RLL                                            
+--    ON RLL.EMNNO = ERL.EMNNO                                            
+--   AND RLL.HTNNO = ERL.HTNNO                           
+--   AND RLL.CreateListTime = CONVERT(varchar(23), HREH.HHDT_RUNTIME, 121)                                 
+                               
+         LEFT JOIN RoomingListNotes RLN                            
+    ON RLN.EMNNO = ERL.EMNNO                            
+   AND RLN.HTNNO = ERL.HTNNO                            
+   AND RLN.CreateListTime = CONVERT(varchar(23), HREH.HHDT_RUNTIME, 121)                            
+                            
+   LEFT JOIN RoomingSendEmailDetails RSED                                  
+    ON RSED.EMNNO = ERL.EMNNO                                  
+   AND RSED.HTNNO = ERL.HTNNO                                  
+   AND RSED.ListTime = CONVERT(varchar(23), HREH.HHDT_RUNTIME, 121)        
+         
+   left JOIN RoomingList_Log RLL                                              
+    ON RLL.EMNNO = ERL.EMNNO                                              
+   AND RLL.HTNNO = ERL.HTNNO                             
+   AND RLL.CreateListTime = CONVERT(varchar(23),HREH.HHDT_RUNTIME, 121)       
+ and RLL.CreatedDate = (Select max(CreatedDate) from RoomingList_Log Where RLL.EMNNO = EMNNO                                              
+   AND RLL.HTNNO = HTNNO                             
+   AND RLL.CreateListTime = CreateListTime)      
+   -- LEFT JOIN RoomingList_Log RLL                                              
+   -- ON RLL.EMNNO = RSED.EMNNO                                              
+   --AND RLL.HTNNO = RSED.HTNNO                             
+   --AND RLL.CreateListTime = CONVERT(varchar(23), RSED.ListTime, 121)       
+         
       
- IF (      
-   @ADDREQUEST IS NULL      
-   OR @ADDREQUEST = ''      
-   )      
- BEGIN      
-  IF (      
-    @FROM IS NULL      
-    AND @TO IS NULL      
-    )      
-  BEGIN      
-   WITH InsuranceCTE      
-   AS (      
-    SELECT CASE       
-      WHEN activity_booking.abncanceled = 1      
-       THEN 'NO'      
-      ELSE 'YES'      
-      END AS Insurance      
-     ,RGNNO      
-     ,ROW_NUMBER() OVER (      
-      PARTITION BY RGNNO ORDER BY CASE       
-        WHEN activity_booking.abncanceled = 1      
-         THEN 0      
-        ELSE 1      
-        END DESC      
-      ) AS rn      
-    FROM Activity_Booking      
-    RIGHT JOIN Activity ON Activity_Booking.avnno = Activity.avnno      
-     AND AVNHOTEL = 1      
-    )      
-   SELECT EVENTS.EMNNO      
-    ,EMCNM      
-    ,EMCACRO      
-    ,EMCNO      
-    ,CONVERT(NVARCHAR(20), EMDTBEG, 101) EMDTBEG      
-    ,CONVERT(NVARCHAR(20), EMDTEND, 101) EMDTEND      
-    ,HOTEL.HTNNO      
-    ,HTCDSC      
-    ,HTCACRO      
-    ,'' AS Roomcategory      
-    ,'' AS RSCHOTELCOMMENTS      
-    ,HTCAD1      
-    ,HTCCITY      
-    ,HTCST      
-    ,HTCTEL      
-    ,HTCSLETEL      
-    ,HTCSLENM      
-    ,HTCSLEEMAIL      
-    ,HTCSLETLE      
-    ,HTCSLEFAX      
-    ,RGCPLNM      
-    ,RGCPFNM      
-    ,RGCNO      
-    ,REGMST.RGNNO      
-    ,RGCPMI      
-    ,RGCPPFX      
-    ,RGDTMDY      
-    ,RGCPSFX      
-    ,RGCNIKNM      
-    ,RGCPTLE      
-    ,RGCPORG      
-    ,RGCPAD1      
-    ,RGCPAD2      
-    ,RGCPCITY      
-    ,RGCPST      
-    ,RGCPZIP      
-    ,RGCPCTRY      
-    ,RGCPREGN      
-    ,RGCBEMAIL      
-    ,RGCEMAIL      
-    ,CONVERT(NVARCHAR(20), RGDTADD, 101) RGDTADD1      
-   -- ,CONVERT(NVARCHAR(30), RGD_ACO_CREATE_TIME, 101) RGDTADD      
-   ,FORMAT(CAST(RGD_ACO_CREATE_TIME AS DATETIME), 'MM/dd/yyyy hh:mm tt') as  RGDTADD  
-    ,RGCHTEL      
-    ,RGCHFAX      
-    ,RGCPTEL      
-    ,RGN_ACO_HTNNO      
-    ,CONVERT(NVARCHAR(20), RGD_ACO_ARR, 101) RGD_ACO_ARR      
-    ,CONVERT(NVARCHAR(20), RGD_ACO_DEP, 101) RGD_ACO_DEP      
-    ,RGN_ACO_ROOMS      
-    ,RGC_ACO_CCTYPE      
-    ,RGC_ACO_CC      
-    ,RGC_ACO_CCEXP      
-    ,RGC_ACO_CCNAME      
-    ,RGC_ACO_STATUS      
-    ,RGC_ACO_AGENT_NOTES      
-    ,RGC_ACO_SPCL_REQUESTS      
-    ,0 AS RSNNO      
-    ,'' AS RSDTXLD      
-    ,RGC_ACO_BLOCKCODE      
-    ,isnull(InsuranceCTE.Insurance, 'NO') Insurance      
-   FROM REGMST      
-   INNER JOIN EVENTS ON EVENTS.EMNNO = REGMST.EMNNO      
-   LEFT JOIN HOTEL ON REGMST.RGN_ACO_HTNNO = HOTEL.HTNNO      
-   LEFT JOIN InsuranceCTE ON InsuranceCTE.RGNNO = REGMST.RGNNO      
-    AND InsuranceCTE.rn = 1      
-   WHERE   
-   --RGC_ACO_CCTYPE IS NOT NULL      
-   -- AND RGC_ACO_CC IS NOT NULL      
-    --AND RGC_ACO_CCEXP IS NOT NULL      
-    --AND RGC_ACO_CCNAME IS NOT NULL      
-     RGC_ACO_STATUS LIKE '%' + @STATUS + '%'      
-    AND (      
-     RGC_ACO_ADD_REQUEST IS NULL      
-     OR RGC_ACO_ADD_REQUEST LIKE '%' + @ADDREQUEST + '%'      
-     )      
-   ORDER BY EMDTBEG      
-    ,EMCNO      
-    ,HTCDSC      
-    ,RGD_ACO_CREATE_TIME      
-    ,RGCPLNM      
-    ,RGCPFNM      
-    ,RGCNO      
-  END      
-  ELSE      
-  BEGIN      
-   WITH InsuranceCTE      
-   AS (      
-    SELECT CASE       
-      WHEN activity_booking.abncanceled = 1      
-       THEN 'NO'      
-      ELSE 'YES'      
-      END AS Insurance      
-     ,RGNNO      
-     ,ROW_NUMBER() OVER (      
-      PARTITION BY RGNNO ORDER BY CASE       
-        WHEN activity_booking.abncanceled = 1      
-         THEN 0      
-        ELSE 1      
-        END DESC      
-      ) AS rn      
-    FROM Activity_Booking      
-    RIGHT JOIN Activity ON Activity_Booking.avnno = Activity.avnno      
-     AND AVNHOTEL = 1      
-    )      
-   SELECT EVENTS.EMNNO      
-    ,EMCNM      
-    ,EMCACRO      
-    ,EMCNO      
-    ,CONVERT(NVARCHAR(20), EMDTBEG, 101) EMDTBEG      
-    ,CONVERT(NVARCHAR(20), EMDTEND, 101) EMDTEND      
-    ,HOTEL.HTNNO      
-    ,HTCDSC      
-    ,HTCACRO      
-    ,'' AS Roomcategory      
-    ,'' AS RSCHOTELCOMMENTS      
-    ,HTCAD1      
-    ,HTCCITY      
-    ,HTCST      
-    ,HTCTEL      
-    ,HTCSLETEL      
-    ,HTCSLENM      
-    ,HTCSLEEMAIL      
-    ,HTCSLETLE      
-    ,HTCSLEFAX      
-    ,RGCPLNM      
-    ,RGCPFNM     
-    ,RGCNO      
-    ,REGMST.RGNNO      
-    ,RGCPMI      
-    ,RGCPPFX      
-    ,RGDTMDY      
-    ,RGCPSFX      
-    ,RGCNIKNM      
-    ,RGCPTLE      
-    ,RGCPORG      
-    ,RGCPAD1      
-    ,RGCPAD2      
-    ,RGCPCITY      
-    ,RGCPST      
-    ,RGCPZIP      
-    ,RGCPCTRY      
-    ,RGCPREGN      
-    ,RGCBEMAIL      
-    ,RGCEMAIL      
-    ,CONVERT(NVARCHAR(20), RGDTADD, 101) RGDTADD1      
-    --,CONVERT(NVARCHAR(30), RGD_ACO_CREATE_TIME, 101) RGDTADD      
- ,FORMAT(CAST(RGD_ACO_CREATE_TIME AS DATETIME), 'MM/dd/yyyy hh:mm tt') as RGDTADD  
-    ,RGCHTEL      
-    ,RGCHFAX      
-    ,RGCPTEL      
-    ,RGN_ACO_HTNNO      
-    ,CONVERT(NVARCHAR(20), RGD_ACO_ARR, 101) RGD_ACO_ARR      
-    ,CONVERT(NVARCHAR(20), RGD_ACO_DEP, 101) RGD_ACO_DEP      
-    ,RGN_ACO_ROOMS      
-    ,RGC_ACO_CCTYPE      
-    ,RGC_ACO_CC      
-    ,RGC_ACO_CCEXP      
-    ,RGC_ACO_CCNAME      
-    ,RGC_ACO_STATUS      
-    ,RGC_ACO_AGENT_NOTES      
-    ,RGC_ACO_SPCL_REQUESTS      
-    ,0 AS RSNNO      
-    ,'' AS RSDTXLD      
-    ,RGC_ACO_BLOCKCODE      
-    ,isnull(InsuranceCTE.Insurance, 'NO') Insurance      
-   FROM REGMST      
-   INNER JOIN EVENTS ON EVENTS.EMNNO = REGMST.EMNNO      
-   LEFT JOIN HOTEL ON REGMST.RGN_ACO_HTNNO = HOTEL.HTNNO      
-   LEFT JOIN InsuranceCTE ON InsuranceCTE.RGNNO = REGMST.RGNNO      
-    AND InsuranceCTE.rn = 1      
-   WHERE   
-   --RGC_ACO_CCTYPE IS NOT NULL      
-    --AND RGC_ACO_CC IS NOT NULL      
-    --AND RGC_ACO_CCEXP IS NOT NULL      
-    --AND RGC_ACO_CCNAME IS NOT NULL      
-     RGD_ACO_CREATE_TIME BETWEEN @FROM      
-     AND @TO      
-    AND RGC_ACO_STATUS LIKE '%' + @STATUS + '%'      
-    AND (      
-     RGC_ACO_ADD_REQUEST IS NULL      
-     OR RGC_ACO_ADD_REQUEST LIKE '%' + @ADDREQUEST + '%'      
-     )      
-   ORDER BY EMDTBEG      
-    ,EMCNO      
-    ,HTCDSC      
-    ,RGD_ACO_CREATE_TIME      
-    ,RGCPLNM      
-    ,RGCPFNM      
-    ,RGCNO      
-  END      
- END      
- ELSE      
- BEGIN      
-  IF (      
-    @FROM IS NULL      
-    AND @TO IS NULL      
-    )      
-  BEGIN      
-   WITH InsuranceCTE      
-   AS (      
-    SELECT CASE       
-      WHEN activity_booking.abncanceled = 1      
-       THEN 'NO'      
-      ELSE 'YES'      
-      END AS Insurance      
-     ,RGNNO      
-     ,ROW_NUMBER() OVER (      
-      PARTITION BY RGNNO ORDER BY CASE       
-        WHEN activity_booking.abncanceled = 1      
-         THEN 0      
-        ELSE 1      
-        END DESC      
-      ) AS rn      
-    FROM Activity_Booking      
-    RIGHT JOIN Activity ON Activity_Booking.avnno = Activity.avnno      
-     AND AVNHOTEL = 1      
-    )      
-   SELECT EVENTS.EMNNO      
-    ,EMCNM      
-    ,EMCACRO      
-    ,EMCNO      
-    ,CONVERT(NVARCHAR(20), EMDTBEG, 101) EMDTBEG      
-    ,CONVERT(NVARCHAR(20), EMDTEND, 101) EMDTEND      
-    ,HOTEL.HTNNO      
-    ,HTCDSC      
-    ,HTCACRO      
-    ,'' AS Roomcategory      
-    ,'' AS RSCHOTELCOMMENTS      
-    ,HTCAD1      
-    ,HTCCITY      
-    ,HTCST      
-    ,HTCTEL      
-    ,HTCSLETEL      
-    ,HTCSLENM      
-    ,HTCSLEEMAIL      
-    ,HTCSLETLE      
-    ,HTCSLEFAX      
-    ,RGCPLNM      
-    ,RGCPFNM      
-    ,RGCNO      
-    ,REGMST.RGNNO      
-    ,RGCPMI      
-    ,RGCPPFX      
-    ,RGDTMDY      
-    ,RGCPSFX      
-    ,RGCNIKNM      
-    ,RGCPTLE      
-    ,RGCPORG      
-    ,RGCPAD1      
-    ,RGCPAD2      
-    ,RGCPCITY      
-    ,RGCPST      
-    ,RGCPZIP      
-    ,RGCPCTRY      
-    ,RGCPREGN      
-    ,RGCBEMAIL      
-    ,RGCEMAIL      
-    ,CONVERT(NVARCHAR(20), RGDTADD, 101) RGDTADD1      
-   -- ,CONVERT(NVARCHAR(30), RGD_ACO_CREATE_TIME, 101) RGDTADD      
- ,FORMAT(CAST(RGD_ACO_CREATE_TIME AS DATETIME), 'MM/dd/yyyy hh:mm tt') as RGDTADD  
-    ,RGCHTEL      
-    ,RGCHFAX      
-    ,RGCPTEL      
-    ,RGN_ACO_HTNNO      
-    ,CONVERT(NVARCHAR(20), RGD_ACO_ARR, 101) RGD_ACO_ARR      
-    ,CONVERT(NVARCHAR(20), RGD_ACO_DEP, 101) RGD_ACO_DEP      
-    ,RGN_ACO_ROOMS      
-    ,RGC_ACO_CCTYPE      
-    ,RGC_ACO_CC      
-    ,RGC_ACO_CCEXP      
-    ,RGC_ACO_CCNAME      
-    ,RGC_ACO_STATUS      
-    ,RGC_ACO_AGENT_NOTES      
-    ,RGC_ACO_SPCL_REQUESTS      
-    ,0 AS RSNNO      
-    ,'' AS RSDTXLD      
-    ,RGC_ACO_BLOCKCODE      
-    ,isnull(InsuranceCTE.Insurance, 'NO') Insurance      
-   FROM REGMST      
-   INNER JOIN EVENTS ON EVENTS.EMNNO = REGMST.EMNNO      
-   LEFT JOIN HOTEL ON REGMST.RGN_ACO_HTNNO = HOTEL.HTNNO      
-   LEFT JOIN      
-    InsuranceCTE ON InsuranceCTE.RGNNO = REGMST.RGNNO      
-    AND InsuranceCTE.rn = 1      
-   WHERE   
-   --RGC_ACO_CCTYPE IS NOT NULL      
-    --AND RGC_ACO_CC IS NOT NULL      
-    --AND RGC_ACO_CCEXP IS NOT NULL          
- --AND RGC_ACO_CCNAME IS NOT NULL      
-     RGC_ACO_STATUS LIKE '%' + @STATUS + '%'      
-    AND RGC_ACO_ADD_REQUEST LIKE '%' + @ADDREQUEST + '%'      
-   ORDER BY EMDTBEG      
-    ,EMCNO      
-    ,HTCDSC      
-    ,RGD_ACO_CREATE_TIME      
-    ,RGCPLNM      
-    ,RGCPFNM      
-    ,RGCNO      
-  END      
-  ELSE      
-  BEGIN      
-   SELECT EVENTS.EMNNO      
-    ,EMCNM      
-    ,EMCACRO      
-    ,EMCNO      
-    ,CONVERT(NVARCHAR(20), EMDTBEG, 101) EMDTBEG      
-    ,CONVERT(NVARCHAR(20), EMDTEND, 101) EMDTEND      
-    ,HOTEL.HTNNO      
-    ,HTCDSC      
-    ,HTCACRO      
-    ,'' AS Roomcategory      
-    ,'' AS RSCHOTELCOMMENTS      
-    ,HTCAD1      
-    ,HTCCITY      
-    ,HTCST      
-    ,HTCTEL      
-    ,HTCSLETEL      
-    ,HTCSLENM      
-    ,HTCSLEEMAIL      
-    ,HTCSLETLE      
-    ,HTCSLEFAX      
-    ,RGCPLNM      
-    ,RGCPFNM      
-    ,RGCNO      
-    ,REGMST.RGNNO      
-    ,RGCPMI      
-    ,RGCPPFX      
-    ,RGDTMDY      
-    ,RGCPSFX      
-    ,RGCNIKNM      
-    ,RGCPTLE      
-    ,RGCPORG      
-    ,RGCPAD1      
-    ,RGCPAD2      
-    ,RGCPCITY      
-    ,RGCPST      
-    ,RGCPZIP      
-    ,RGCPCTRY      
-    ,RGCPREGN      
-    ,RGCBEMAIL      
-    ,RGCEMAIL      
-    ,CONVERT(NVARCHAR(20), RGDTADD, 101) RGDTADD1      
-    ,CONVERT(NVARCHAR(30), RGD_ACO_CREATE_TIME, 101) RGDTADD 
-    ,RGCHTEL      
-    ,RGCHFAX      
-    ,RGCPTEL      
-    ,RGN_ACO_HTNNO      
-    ,CONVERT(NVARCHAR(20), RGD_ACO_ARR, 101) RGD_ACO_ARR      
-    ,CONVERT(NVARCHAR(20), RGD_ACO_DEP, 101) RGD_ACO_DEP      
-    ,RGN_ACO_ROOMS      
-    ,RGC_ACO_CCTYPE      
-    ,RGC_ACO_CC      
-    ,RGC_ACO_CCEXP      
-    ,RGC_ACO_CCNAME      
-    ,RGC_ACO_STATUS      
-    ,RGC_ACO_AGENT_NOTES      
-    ,RGC_ACO_SPCL_REQUESTS      
-    ,RESERVATIONS.RSNNO      
-    ,RESERVATIONS.RSDTXLD      
-    ,RGC_ACO_BLOCKCODE      
-    ,isnull(Act.Insurance, 'NO') Insurance      
-   FROM REGMST      
-   INNER JOIN EVENTS ON EVENTS.EMNNO = REGMST.EMNNO      
-   LEFT JOIN HOTEL ON REGMST.RGN_ACO_HTNNO = HOTEL.HTNNO      
-   LEFT JOIN RESERVATIONS ON REGMST.RGNNO = RESERVATIONS.RGNNO      
-   LEFT JOIN (      
-    SELECT (      
-      CASE       
-       WHEN activity_booking.abncanceled = 1      
-        THEN 'NO'      
-       ELSE 'YES'      
-       END      
-      ) Insurance      
-     ,RGNNO      
-    FROM Activity_Booking      
-    INNER JOIN Activity ON Activity_Booking.avnno = Activity.avnno      
-     AND AVNHOTEL = 1      
-    ) Act ON act.RGNNO = REGMST.RGNNO      
-   WHERE   
-  -- RGC_ACO_CCTYPE IS NOT NULL      
-   -- AND RGC_ACO_CC IS NOT NULL      
-    --AND RGC_ACO_CCEXP IS NOT NULL      
-    --AND RGC_ACO_CCNAME IS NOT NULL      
-     RGD_ACO_CREATE_TIME BETWEEN @FROM      
-     AND @TO      
-    AND RGC_ACO_STATUS LIKE '%' + @STATUS + '%'      
-    AND RGC_ACO_ADD_REQUEST LIKE '%' + @ADDREQUEST + '%'      
-   ORDER BY EMDTBEG      
-    ,EMCNO      
-    ,HTCDSC      
-    ,RGD_ACO_CREATE_TIME      
-    ,RGCPLNM      
-    ,RGCPFNM      
-    ,RGCNO      
-  END      
- END      
-END  
+   where EVT.EMCNO= '3lv'                                        
+GROUP BY                                          
+    --ERL.ERLNNO,                                          
+    ERL.EMNNO,                                            
+    ERL.HTNNO,                                            
+    EVT.EMCNM,                                        
+ EVT.EMDTBEG,                    
+ EVT.EMDTEND,                                        
+    HREH.HHN_RFP_ID,                                            
+    HREH.HHC_HOTEL_NAME,                                            
+    HREH.HHDT_FROM,                                            
+    HREH.HHDT_TO,                                            
+    HREH.HHDT_RUNTIME,                                            
+RC.NewCount,                                            
+    RC.ChangedCount,                                            
+    RC.CanceledCount,                                            
+    RLL.Mode,                                      
+RLN.RoomListNote,                            
+RLN.RoomListNoteCreatedBy,                            
+    RLN.Email,                            
+RLN.CreatedDate,                            
+RSED.ExpireTime,                                 
+            
+ RLL.IsConfirm,                                  
+ RLL.CreatedDate,           
+ HT152.REFID,          
+HT152.HRCEmail,          
+HT152.HSMEmail,          
+HT152.Name,          
+HT152.Phone,       
+HREH.GUID_,      
+ISNULL(RSED.IsDisabledEmail, 0)                                  
+    
+--ORDER BY HREH.HHDT_RUNTIME DESC;                     
+                                            
+ORDER BY RLL.CreatedDate DESC;  
